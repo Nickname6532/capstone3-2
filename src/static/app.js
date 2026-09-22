@@ -3,6 +3,7 @@ const statsEl = document.getElementById("stats");
 const form = document.getElementById("claim-form");
 const filterStatus = document.getElementById("filter-status");
 const filterChannel = document.getElementById("filter-channel");
+const filterAssignee = document.getElementById("filter-assignee");
 const filterQ = document.getElementById("filter-q");
 
 async function loadStats() {
@@ -32,6 +33,7 @@ async function loadClaims() {
   const params = new URLSearchParams();
   if (filterStatus.value) params.set("status", filterStatus.value);
   if (filterChannel.value) params.set("channel", filterChannel.value);
+  if (filterAssignee.value) params.set("assignee", filterAssignee.value);
   if (filterQ.value) params.set("q", filterQ.value);
   const res = await fetch("/api/claims?" + params.toString());
   const claims = await res.json();
@@ -159,6 +161,7 @@ document.getElementById("import-btn").addEventListener("click", async () => {
 document.getElementById("refresh-btn").addEventListener("click", loadClaims);
 filterStatus.addEventListener("change", loadClaims);
 filterChannel.addEventListener("change", loadClaims);
+filterAssignee.addEventListener("input", debounce(loadClaims, 300));
 filterQ.addEventListener("input", debounce(loadClaims, 300));
 
 function debounce(fn, ms) {

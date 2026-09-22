@@ -239,8 +239,8 @@ class ClaimsStore:
             clauses.append("status = ?")
             params.append(status)
         if assignee:
-            clauses.append("assignee = ?")
-            params.append(assignee)
+            clauses.append("assignee LIKE ?")
+            params.append(f"%{assignee}%")
         if channel:
             clauses.append("channel = ?")
             params.append(channel)
