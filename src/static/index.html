@@ -69,15 +69,17 @@
       <label>검색 <input id="filter-q" placeholder="고객사 / 제품 / 내용" /></label>
       <button id="refresh-btn" type="button">새로고침</button>
     </div>
-    <table>
-      <thead>
-        <tr>
-          <th>ID</th><th>접수일시</th><th>채널</th><th>고객사</th><th>연락처</th><th>제품</th><th>유형</th>
-          <th>내용</th><th>담당자</th><th>상태</th><th>액션</th>
-        </tr>
-      </thead>
-      <tbody id="claims-body"></tbody>
-    </table>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th><th>접수일시</th><th>채널</th><th>고객사</th><th>연락처</th><th>제품</th><th>유형</th>
+            <th>내용</th><th>담당자</th><th>상태</th><th>액션</th>
+          </tr>
+        </thead>
+        <tbody id="claims-body"></tbody>
+      </table>
+    </div>
   </section>
 </main>
 
