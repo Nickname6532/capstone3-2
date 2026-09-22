@@ -10,3 +10,6 @@ src/logs/
 
 # Vercel
 .vercel/
+
+# Claude Code 세션 런타임 파일
+.claude/scheduled_tasks.lock
