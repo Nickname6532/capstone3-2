@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>클레임 통합관리 시스템</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+<header>
+  <h1>고객 클레임 접수·처리 통합관리</h1>
+</header>
+
+<main>
+  <section class="stats" id="stats"></section>
+
+  <section class="panel">
+    <h2>클레임 접수 (내부입력)</h2>
+    <p style="color: var(--muted); font-size: 13px; margin-top: -6px;">
+      고객이 직접 접수하는 웹/앱 폼: <a href="/submit" target="_blank">/submit</a>
+    </p>
+    <form id="claim-form">
+      <div class="row">
+        <label>고객사 <input name="customer" required /></label>
+        <label>제품/모델 <input name="product" required /></label>
+      </div>
+      <div class="row">
+        <label>원인 유형
+          <select name="category">
+            <option value="">미분류</option>
+            <option>부품불량</option>
+            <option>배송지연</option>
+            <option>설치오류</option>
+            <option>사용자오조작</option>
+            <option>기타</option>
+          </select>
+        </label>
+        <label>금액(원) <input name="amount_krw" type="number" value="0" /></label>
+        <label>담당자 <input name="assignee" placeholder="선택" /></label>
+      </div>
+      <label>클레임 내용
+        <textarea name="description" rows="3" required placeholder="통화 요약, STT 결과 등을 입력"></textarea>
+      </label>
+      <button type="submit">접수 등록</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <h2>클레임 목록</h2>
+    <div class="filters">
+      <label>상태
+        <select id="filter-status">
+          <option value="">전체</option>
+          <option>접수</option>
+          <option>처리중</option>
+          <option>완료</option>
+        </select>
+      </label>
+      <label>채널
+        <select id="filter-channel">
+          <option value="">전체</option>
+          <option>내부입력</option>
+          <option>웹</option>
+          <option>앱</option>
+          <option>문자</option>
+          <option>음성</option>
+        </select>
+      </label>
+      <label>검색 <input id="filter-q" placeholder="고객사 / 제품 / 내용" /></label>
+      <button id="refresh-btn" type="button">새로고침</button>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th><th>접수일시</th><th>채널</th><th>고객사</th><th>연락처</th><th>제품</th><th>유형</th>
+          <th>내용</th><th>담당자</th><th>상태</th><th>액션</th>
+        </tr>
+      </thead>
+      <tbody id="claims-body"></tbody>
+    </table>
+  </section>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

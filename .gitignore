@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+._*
+
+# 로컬 실행 중 생성되는 데이터 (런타임에 자동 생성됨)
+src/data/
+src/logs/
+
+# Vercel
+.vercel/
