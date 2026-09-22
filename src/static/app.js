@@ -105,6 +105,46 @@ form.addEventListener("submit", async (e) => {
   await Promise.all([loadClaims(), loadStats()]);
 });
 
+document.getElementById("import-btn").addEventListener("click", async () => {
+  const fileInput = document.getElementById("import-file");
+  const resultEl = document.getElementById("import-result");
+  const file = fileInput.files[0];
+  if (!file) {
+    alert("파일을 선택해주세요.");
+    return;
+  }
+  const btn = document.getElementById("import-btn");
+  btn.disabled = true;
+  btn.textContent = "가져오는 중...";
+  resultEl.innerHTML = "";
+
+  const fd = new FormData();
+  fd.append("file", file);
+
+  try {
+    const res = await fetch("/api/claims/import", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok) {
+      resultEl.innerHTML = `<p style="color: var(--danger);">가져오기 실패: ${escapeHtml(data.detail || res.status)}</p>`;
+      return;
+    }
+    let html = `<p><strong>${data.imported_count}건</strong> 등록됨 / 총 ${data.total_rows}건 중 ${data.failed_count}건 실패</p>`;
+    if (data.failed_rows && data.failed_rows.length) {
+      html += "<ul style='font-size:13px; color: var(--muted);'>" +
+        data.failed_rows.map(f => `<li>${f.row}행: ${escapeHtml(f.reason)}</li>`).join("") +
+        "</ul>";
+    }
+    resultEl.innerHTML = html;
+    fileInput.value = "";
+    await Promise.all([loadClaims(), loadStats()]);
+  } catch (err) {
+    resultEl.innerHTML = `<p style="color: var(--danger);">네트워크 오류로 가져오기에 실패했습니다.</p>`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "가져오기";
+  }
+});
+
 document.getElementById("refresh-btn").addEventListener("click", loadClaims);
 filterStatus.addEventListener("change", loadClaims);
 filterChannel.addEventListener("change", loadClaims);

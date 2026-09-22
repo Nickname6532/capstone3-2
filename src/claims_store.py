@@ -36,8 +36,9 @@ CHANNEL_WEB = "웹"
 CHANNEL_APP = "앱"
 CHANNEL_SMS = "문자"
 CHANNEL_VOICE = "음성"
+CHANNEL_IMPORT = "일괄가져오기"
 
-VALID_CHANNELS = {CHANNEL_INTERNAL, CHANNEL_WEB, CHANNEL_APP, CHANNEL_SMS, CHANNEL_VOICE}
+VALID_CHANNELS = {CHANNEL_INTERNAL, CHANNEL_WEB, CHANNEL_APP, CHANNEL_SMS, CHANNEL_VOICE, CHANNEL_IMPORT}
 
 FIELDS = [
     "claim_id",
@@ -150,6 +151,56 @@ class ClaimsStore:
             self._conn.commit()
             return row
 
+    def import_claim(self, data: dict[str, Any]) -> dict[str, Any]:
+        """엑셀/CSV로 갖고 있던 과거 클레임 이력을 그대로 가져와 등록한다.
+
+        create_claim과 달리 status/created_at/completed_at을 파일 값 그대로
+        받아들인다(정상 전이 검증을 건너뛴다) — 이미 종결된 과거 기록이기 때문.
+        완료 상태로 들어오면 그 시점(완료일 우선, 없으면 접수일) 기준으로
+        일/월/년 이력에도 반영한다.
+        """
+        with self._lock:
+            now = datetime.now()
+            channel = data.get("channel") or CHANNEL_IMPORT
+            if channel not in VALID_CHANNELS:
+                raise ValueError(f"알 수 없는 접수 채널: {channel}")
+            status = data.get("status") if data.get("status") in VALID_STATUSES else STATUS_RECEIVED
+            created_at = data.get("created_at") or now.strftime("%Y-%m-%d %H:%M:%S")
+            completed_at = data.get("completed_at", "") if status == STATUS_DONE else ""
+            if status == STATUS_DONE and not completed_at:
+                completed_at = created_at
+
+            claim_id = self._next_claim_id(now)
+            row = {
+                "claim_id": claim_id,
+                "created_at": created_at,
+                "updated_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+                "channel": channel,
+                "customer": data.get("customer", ""),
+                "contact": data.get("contact", ""),
+                "product": data.get("product", ""),
+                "category": data.get("category", ""),
+                "amount_krw": float(data.get("amount_krw") or 0),
+                "description": data.get("description", ""),
+                "status": status,
+                "assignee": data.get("assignee", ""),
+                "completed_at": completed_at,
+                "tokens_input": 0,
+                "tokens_output": 0,
+                "cost_krw": 0.0,
+            }
+            self._conn.execute(
+                f"INSERT INTO claims ({', '.join(FIELDS)}) VALUES ({', '.join('?' for _ in FIELDS)})",
+                [row[f] for f in FIELDS],
+            )
+            self._conn.commit()
+
+            if status == STATUS_DONE:
+                when = datetime.strptime(completed_at, "%Y-%m-%d %H:%M:%S")
+                self._flush_to_logger(row, when=when)
+
+            return row
+
     def list_claims(
         self,
         status: Optional[str] = None,
@@ -236,8 +287,11 @@ class ClaimsStore:
             return row
 
     # ------------------------------------------------------------------ #
-    def _flush_to_logger(self, row: dict[str, Any]) -> None:
-        """완료된 클레임을 claim_logger의 daily/monthly/yearly 이력에 기록한다."""
+    def _flush_to_logger(self, row: dict[str, Any], when: Optional[datetime] = None) -> None:
+        """완료된 클레임을 claim_logger의 daily/monthly/yearly 이력에 기록한다.
+
+        when을 지정하면 그 날짜의 이력으로 쌓인다(과거 데이터 일괄 가져오기용).
+        """
         structured = {
             "customer": row.get("customer"),
             "product": row.get("product"),
@@ -259,7 +313,8 @@ class ClaimsStore:
                 "tokens_output": row.get("tokens_output") or 0,
                 "cost_krw": row.get("cost_krw") or 0,
                 "status": "완료",
-            }
+            },
+            when=when,
         )
 
     def _next_claim_id(self, now: datetime) -> str:

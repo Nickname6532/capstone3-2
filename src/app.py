@@ -14,11 +14,12 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+import bulk_import
 from claim_logger import ClaimLogger
 from claims_store import CHANNEL_APP, CHANNEL_INTERNAL, CHANNEL_SMS, CHANNEL_WEB, ClaimNotFound, ClaimsStore, InvalidTransition
 
@@ -125,6 +126,25 @@ def create_claim_from_sms(payload: SmsInbound):
         }
     )
     return row
+
+
+@app.post("/api/claims/import")
+async def import_claims(file: UploadFile = File(...)):
+    """기업이 기존에 엑셀/CSV로 갖고 있던 클레임 이력을 일괄 등록한다."""
+    content = await file.read()
+    try:
+        ok_rows, failed_rows = bulk_import.import_rows(file.filename, content)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    imported = [store.import_claim(row) for row in ok_rows]
+
+    return {
+        "total_rows": len(ok_rows) + len(failed_rows),
+        "imported_count": len(imported),
+        "failed_count": len(failed_rows),
+        "failed_rows": [{"row": f["row"], "reason": f["reason"]} for f in failed_rows[:50]],
+    }
 
 
 @app.get("/api/claims")
