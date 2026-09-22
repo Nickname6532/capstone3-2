@@ -34,8 +34,8 @@ if os.environ.get("VERCEL"):
 else:
     DATA_ROOT = BASE_DIR
 
-store = ClaimsStore(base_dir=DATA_ROOT / "data")
 logger = ClaimLogger(base_dir=DATA_ROOT / "logs")
+store = ClaimsStore(base_dir=DATA_ROOT / "data", logger=logger)
 
 STATIC_DIR = BASE_DIR / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

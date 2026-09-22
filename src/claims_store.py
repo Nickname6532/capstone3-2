@@ -1,15 +1,17 @@
 """
-클레임의 '현재 상태'를 관리하는 마스터 테이블 (data/claims.csv).
+클레임의 '현재 상태'를 관리하는 마스터 테이블 (SQLite: data/claims.db).
 
-claim_logger.py 가 완료된 클레임의 이력을 일/월/년으로 쌓는 로그라면,
-여기는 접수~처리중~완료 사이의 살아있는 상태(담당자, 상태값)를 다루는
-가변 테이블이다. 완료로 전환되는 순간 claim_logger에 기록을 넘긴다.
+claim_logger.py 가 완료된 클레임의 이력을 일/월/년 CSV로 쌓는 리포팅용 로그라면,
+여기는 접수~처리중~완료 사이의 살아있는 상태(담당자, 상태값)를 다루는 원본 데이터다.
+CSV 파일은 여러 담당자가 동시에 접속하면 파일 전체를 다시 쓰는 구조라 쓰기 충돌
+위험이 있고 서버리스 인스턴스 간에도 공유되지 않아, 실사용 단계에서 SQLite로
+전환했다. 완료로 전환되는 순간 claim_logger에 기록을 넘기는 흐름은 그대로다.
 """
 
 from __future__ import annotations
 
 import csv
-import json
+import sqlite3
 import threading
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -56,6 +58,29 @@ FIELDS = [
     "cost_krw",
 ]
 
+_SCHEMA = f"""
+CREATE TABLE IF NOT EXISTS claims (
+    claim_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    channel TEXT NOT NULL,
+    customer TEXT NOT NULL DEFAULT '',
+    contact TEXT NOT NULL DEFAULT '',
+    product TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT '',
+    amount_krw REAL NOT NULL DEFAULT 0,
+    description TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL,
+    assignee TEXT NOT NULL DEFAULT '',
+    completed_at TEXT NOT NULL DEFAULT '',
+    tokens_input INTEGER NOT NULL DEFAULT 0,
+    tokens_output INTEGER NOT NULL DEFAULT 0,
+    cost_krw REAL NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
+CREATE INDEX IF NOT EXISTS idx_claims_channel ON claims(channel);
+"""
+
 
 class InvalidTransition(ValueError):
     pass
@@ -68,25 +93,38 @@ class ClaimNotFound(KeyError):
 @dataclass
 class ClaimsStore:
     base_dir: Path = field(default_factory=lambda: Path("data"))
+    logger: Optional[ClaimLogger] = None
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.base_dir = Path(self.base_dir)
         self.base_dir.mkdir(parents=True, exist_ok=True)
-        self.path = self.base_dir / "claims.csv"
-        self.logger = ClaimLogger(base_dir=Path("logs"))
-        if not self.path.exists():
-            self._write_all([])
+        self.path = self.base_dir / "claims.db"
+        # base_dir 기준 상대경로("logs")는 실행 시 cwd에 따라 다른 곳을 가리킬 수 있어
+        # 호출자가 넘겨주지 않으면 이 파일 위치를 기준으로 한 절대경로를 쓴다.
+        if self.logger is None:
+            self.logger = ClaimLogger(base_dir=Path(__file__).resolve().parent / "logs")
+
+        legacy_csv = self.base_dir / "claims.csv"
+        is_new_db = not self.path.exists()
+
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.executescript(_SCHEMA)
+        self._conn.commit()
+
+        if is_new_db and legacy_csv.exists():
+            self._migrate_from_csv(legacy_csv)
 
     # ------------------------------------------------------------------ #
     def create_claim(self, data: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
-            rows = self._read_all()
             now = datetime.now()
-            claim_id = self._next_claim_id(rows, now)
             channel = data.get("channel") or CHANNEL_INTERNAL
             if channel not in VALID_CHANNELS:
                 raise ValueError(f"알 수 없는 접수 채널: {channel}")
+            claim_id = self._next_claim_id(now)
             row = {
                 "claim_id": claim_id,
                 "created_at": now.strftime("%Y-%m-%d %H:%M:%S"),
@@ -96,17 +134,20 @@ class ClaimsStore:
                 "contact": data.get("contact", ""),
                 "product": data.get("product", ""),
                 "category": data.get("category", ""),
-                "amount_krw": data.get("amount_krw", ""),
+                "amount_krw": float(data.get("amount_krw") or 0),
                 "description": data.get("description", ""),
                 "status": STATUS_RECEIVED,
                 "assignee": data.get("assignee", ""),
                 "completed_at": "",
-                "tokens_input": data.get("tokens_input", ""),
-                "tokens_output": data.get("tokens_output", ""),
-                "cost_krw": data.get("cost_krw", ""),
+                "tokens_input": int(data.get("tokens_input") or 0),
+                "tokens_output": int(data.get("tokens_output") or 0),
+                "cost_krw": float(data.get("cost_krw") or 0),
             }
-            rows.append(row)
-            self._write_all(rows)
+            self._conn.execute(
+                f"INSERT INTO claims ({', '.join(FIELDS)}) VALUES ({', '.join('?' for _ in FIELDS)})",
+                [row[f] for f in FIELDS],
+            )
+            self._conn.commit()
             return row
 
     def list_claims(
@@ -116,37 +157,42 @@ class ClaimsStore:
         channel: Optional[str] = None,
         q: Optional[str] = None,
     ) -> list[dict[str, Any]]:
-        rows = self._read_all()
+        clauses = []
+        params: list[Any] = []
         if status:
-            rows = [r for r in rows if r.get("status") == status]
+            clauses.append("status = ?")
+            params.append(status)
         if assignee:
-            rows = [r for r in rows if r.get("assignee") == assignee]
+            clauses.append("assignee = ?")
+            params.append(assignee)
         if channel:
-            rows = [r for r in rows if r.get("channel") == channel]
+            clauses.append("channel = ?")
+            params.append(channel)
         if q:
-            q_lower = q.lower()
-            rows = [
-                r
-                for r in rows
-                if q_lower in (r.get("customer", "") + r.get("product", "") + r.get("description", "")).lower()
-            ]
-        rows.sort(key=lambda r: r.get("created_at", ""), reverse=True)
-        return rows
+            clauses.append("(customer LIKE ? OR product LIKE ? OR description LIKE ?)")
+            like = f"%{q}%"
+            params.extend([like, like, like])
+
+        sql = "SELECT * FROM claims"
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        sql += " ORDER BY created_at DESC"
+
+        rows = self._conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
 
     def get_claim(self, claim_id: str) -> dict[str, Any]:
-        rows = self._read_all()
-        for r in rows:
-            if r["claim_id"] == claim_id:
-                return r
-        raise ClaimNotFound(claim_id)
+        row = self._conn.execute("SELECT * FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()
+        if row is None:
+            raise ClaimNotFound(claim_id)
+        return dict(row)
 
     def update_claim(self, claim_id: str, updates: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
-            rows = self._read_all()
-            idx = next((i for i, r in enumerate(rows) if r["claim_id"] == claim_id), None)
-            if idx is None:
+            current = self._conn.execute("SELECT * FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()
+            if current is None:
                 raise ClaimNotFound(claim_id)
-            row = rows[idx]
+            row = dict(current)
 
             new_status = updates.get("status")
             if new_status is not None and new_status != row["status"]:
@@ -163,8 +209,26 @@ class ClaimsStore:
                     row[key] = updates[key]
 
             row["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            rows[idx] = row
-            self._write_all(rows)
+
+            self._conn.execute(
+                """UPDATE claims SET updated_at=?, status=?, assignee=?, category=?, amount_krw=?,
+                   description=?, completed_at=?, tokens_input=?, tokens_output=?, cost_krw=?
+                   WHERE claim_id=?""",
+                (
+                    row["updated_at"],
+                    row["status"],
+                    row["assignee"],
+                    row["category"],
+                    row["amount_krw"],
+                    row["description"],
+                    row["completed_at"],
+                    row["tokens_input"],
+                    row["tokens_output"],
+                    row["cost_krw"],
+                    claim_id,
+                ),
+            )
+            self._conn.commit()
 
             if row["status"] == STATUS_DONE:
                 self._flush_to_logger(row)
@@ -198,31 +262,36 @@ class ClaimsStore:
             }
         )
 
-    def _next_claim_id(self, rows: list[dict[str, Any]], now: datetime) -> str:
+    def _next_claim_id(self, now: datetime) -> str:
         prefix = f"CLM-{now.strftime('%Y%m%d')}-"
-        today_seqs = [
+        rows = self._conn.execute(
+            "SELECT claim_id FROM claims WHERE claim_id LIKE ?", (f"{prefix}%",)
+        ).fetchall()
+        seqs = [
             int(r["claim_id"].rsplit("-", 1)[-1])
             for r in rows
-            if r["claim_id"].startswith(prefix) and r["claim_id"].rsplit("-", 1)[-1].isdigit()
+            if r["claim_id"].rsplit("-", 1)[-1].isdigit()
         ]
-        next_seq = (max(today_seqs) + 1) if today_seqs else 1
+        next_seq = (max(seqs) + 1) if seqs else 1
         return f"{prefix}{next_seq:03d}"
 
-    def _read_all(self) -> list[dict[str, Any]]:
-        if not self.path.exists():
-            return []
-        with self.path.open("r", newline="", encoding="utf-8-sig") as f:
+    def _migrate_from_csv(self, legacy_csv: Path) -> None:
+        """이전 CSV 마스터 테이블(data/claims.csv)이 있으면 최초 1회 SQLite로 옮긴다."""
+        with legacy_csv.open("r", newline="", encoding="utf-8-sig") as f:
             rows = list(csv.DictReader(f))
-        # 구 스키마(channel/contact 없음) 파일을 읽을 때를 대비한 하위호환 보정
-        for row in rows:
+        if not rows:
+            return
+        for r in rows:
             for key in FIELDS:
-                row.setdefault(key, "")
-            if not row["channel"]:
-                row["channel"] = CHANNEL_INTERNAL
-        return rows
-
-    def _write_all(self, rows: list[dict[str, Any]]) -> None:
-        with self.path.open("w", newline="", encoding="utf-8-sig") as f:
-            writer = csv.DictWriter(f, fieldnames=FIELDS)
-            writer.writeheader()
-            writer.writerows(rows)
+                r.setdefault(key, "")
+            r["channel"] = r["channel"] or CHANNEL_INTERNAL
+            r["amount_krw"] = float(r["amount_krw"] or 0)
+            r["cost_krw"] = float(r["cost_krw"] or 0)
+            r["tokens_input"] = int(float(r["tokens_input"])) if r["tokens_input"] else 0
+            r["tokens_output"] = int(float(r["tokens_output"])) if r["tokens_output"] else 0
+        self._conn.executemany(
+            f"INSERT OR IGNORE INTO claims ({', '.join(FIELDS)}) VALUES ({', '.join('?' for _ in FIELDS)})",
+            [[r[f] for f in FIELDS] for r in rows],
+        )
+        self._conn.commit()
+        legacy_csv.rename(legacy_csv.with_suffix(".csv.migrated"))
