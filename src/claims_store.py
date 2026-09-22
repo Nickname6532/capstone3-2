@@ -91,6 +91,14 @@ class ClaimNotFound(KeyError):
     pass
 
 
+class DuplicateClaim(ValueError):
+    """import_claim이 DB에 이미 있는 것과 같은 내용을 발견했을 때."""
+
+    def __init__(self, existing_claim_id: str):
+        self.existing_claim_id = existing_claim_id
+        super().__init__(f"이미 등록된 클레임과 동일한 내용입니다 ({existing_claim_id})")
+
+
 @dataclass
 class ClaimsStore:
     base_dir: Path = field(default_factory=lambda: Path("data"))
@@ -151,13 +159,22 @@ class ClaimsStore:
             self._conn.commit()
             return row
 
-    def import_claim(self, data: dict[str, Any]) -> dict[str, Any]:
+    def find_duplicate(self, customer: str, product: str, description: str, created_at: str) -> Optional[str]:
+        """같은 고객사·제품·내용·접수일을 가진 클레임이 이미 있으면 그 claim_id를 반환한다."""
+        row = self._conn.execute(
+            "SELECT claim_id FROM claims WHERE customer=? AND product=? AND description=? AND created_at=?",
+            (customer, product, description, created_at),
+        ).fetchone()
+        return row["claim_id"] if row else None
+
+    def import_claim(self, data: dict[str, Any], skip_duplicates: bool = True) -> dict[str, Any]:
         """엑셀/CSV로 갖고 있던 과거 클레임 이력을 그대로 가져와 등록한다.
 
         create_claim과 달리 status/created_at/completed_at을 파일 값 그대로
         받아들인다(정상 전이 검증을 건너뛴다) — 이미 종결된 과거 기록이기 때문.
         완료 상태로 들어오면 그 시점(완료일 우선, 없으면 접수일) 기준으로
-        일/월/년 이력에도 반영한다.
+        일/월/년 이력에도 반영한다. skip_duplicates가 True(기본값)면 DB에
+        이미 동일한 내용(고객사/제품/내용/접수일)이 있을 때 DuplicateClaim을 던진다.
         """
         with self._lock:
             now = datetime.now()
@@ -165,7 +182,15 @@ class ClaimsStore:
             if channel not in VALID_CHANNELS:
                 raise ValueError(f"알 수 없는 접수 채널: {channel}")
             status = data.get("status") if data.get("status") in VALID_STATUSES else STATUS_RECEIVED
+            customer = data.get("customer", "")
+            product = data.get("product", "")
+            description = data.get("description", "")
             created_at = data.get("created_at") or now.strftime("%Y-%m-%d %H:%M:%S")
+
+            if skip_duplicates:
+                existing = self.find_duplicate(customer, product, description, created_at)
+                if existing:
+                    raise DuplicateClaim(existing)
             completed_at = data.get("completed_at", "") if status == STATUS_DONE else ""
             if status == STATUS_DONE and not completed_at:
                 completed_at = created_at
@@ -176,12 +201,12 @@ class ClaimsStore:
                 "created_at": created_at,
                 "updated_at": now.strftime("%Y-%m-%d %H:%M:%S"),
                 "channel": channel,
-                "customer": data.get("customer", ""),
+                "customer": customer,
                 "contact": data.get("contact", ""),
-                "product": data.get("product", ""),
+                "product": product,
                 "category": data.get("category", ""),
                 "amount_krw": float(data.get("amount_krw") or 0),
-                "description": data.get("description", ""),
+                "description": description,
                 "status": status,
                 "assignee": data.get("assignee", ""),
                 "completed_at": completed_at,

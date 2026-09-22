@@ -128,10 +128,21 @@ document.getElementById("import-btn").addEventListener("click", async () => {
       resultEl.innerHTML = `<p style="color: var(--danger);">가져오기 실패: ${escapeHtml(data.detail || res.status)}</p>`;
       return;
     }
-    let html = `<p><strong>${data.imported_count}건</strong> 등록됨 / 총 ${data.total_rows}건 중 ${data.failed_count}건 실패</p>`;
+    let html = `<p><strong>${data.imported_count}건</strong> 등록됨 / 총 ${data.total_rows}건 중 ` +
+      `중복 ${data.duplicate_count}건 제외, 실패 ${data.failed_count}건</p>`;
     if (data.failed_rows && data.failed_rows.length) {
-      html += "<ul style='font-size:13px; color: var(--muted);'>" +
-        data.failed_rows.map(f => `<li>${f.row}행: ${escapeHtml(f.reason)}</li>`).join("") +
+      html += "<p style='font-size:13px; color: var(--danger); margin-bottom:2px;'>실패</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
+        data.failed_rows.map(f => `<li>${f.row ? f.row + "행: " : ""}${escapeHtml(f.reason)}</li>`).join("") +
+        "</ul>";
+    }
+    if (data.duplicate_rows && data.duplicate_rows.length) {
+      html += "<p style='font-size:13px; color: var(--warn); margin-bottom:2px;'>중복 (건너뜀)</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
+        data.duplicate_rows.map(d => `<li>${d.row ? d.row + "행: " : ""}${escapeHtml(d.reason)}</li>`).join("") +
+        "</ul>";
+    }
+    if (data.warnings && data.warnings.length) {
+      html += "<p style='font-size:13px; color: var(--muted); margin-bottom:2px;'>주의(자동 보정됨)</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
+        data.warnings.map(w => `<li>${w.claim_id}: ${w.warnings.map(escapeHtml).join(", ")}</li>`).join("") +
         "</ul>";
     }
     resultEl.innerHTML = html;

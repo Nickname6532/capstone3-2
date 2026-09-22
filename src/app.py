@@ -10,9 +10,10 @@ from __future__ import annotations
 
 import json
 import os
+import sqlite3
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
@@ -21,7 +22,16 @@ from pydantic import BaseModel
 
 import bulk_import
 from claim_logger import ClaimLogger
-from claims_store import CHANNEL_APP, CHANNEL_INTERNAL, CHANNEL_SMS, CHANNEL_WEB, ClaimNotFound, ClaimsStore, InvalidTransition
+from claims_store import (
+    CHANNEL_APP,
+    CHANNEL_INTERNAL,
+    CHANNEL_SMS,
+    CHANNEL_WEB,
+    ClaimNotFound,
+    ClaimsStore,
+    DuplicateClaim,
+    InvalidTransition,
+)
 
 app = FastAPI(title="클레임 통합관리 시스템")
 
@@ -130,20 +140,42 @@ def create_claim_from_sms(payload: SmsInbound):
 
 @app.post("/api/claims/import")
 async def import_claims(file: UploadFile = File(...)):
-    """기업이 기존에 엑셀/CSV로 갖고 있던 클레임 이력을 일괄 등록한다."""
+    """기업이 기존에 엑셀/CSV로 갖고 있던 클레임 이력을 일괄 등록한다.
+
+    파일 자체가 문제(형식/용량/인코딩/손상)면 400으로 즉시 실패한다.
+    행 단위 문제는 성공/중복/실패로 분류해서 보고하며, 한 행이 실패해도
+    나머지 행 처리는 계속된다.
+    """
     content = await file.read()
     try:
-        ok_rows, failed_rows = bulk_import.import_rows(file.filename, content)
+        ok_rows, file_duplicates, failed_rows = bulk_import.import_rows(file.filename, content)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-    imported = [store.import_claim(row) for row in ok_rows]
+    imported_count = 0
+    warning_rows: list[dict[str, Any]] = []
+    duplicate_rows = [{"row": d["row"], "reason": d["reason"]} for d in file_duplicates]
+
+    for i, mapped in enumerate(ok_rows, start=1):
+        warnings = mapped.pop("_warnings", None)
+        try:
+            row = store.import_claim(mapped)
+            imported_count += 1
+            if warnings:
+                warning_rows.append({"claim_id": row["claim_id"], "warnings": warnings})
+        except DuplicateClaim as e:
+            duplicate_rows.append({"reason": f"기존 데이터와 동일 ({e.existing_claim_id})"})
+        except (ValueError, sqlite3.Error) as e:
+            failed_rows.append({"row": None, "reason": str(e)})
 
     return {
-        "total_rows": len(ok_rows) + len(failed_rows),
-        "imported_count": len(imported),
+        "total_rows": len(ok_rows) + len(duplicate_rows) + len(failed_rows),
+        "imported_count": imported_count,
+        "duplicate_count": len(duplicate_rows),
         "failed_count": len(failed_rows),
+        "duplicate_rows": duplicate_rows[:50],
         "failed_rows": [{"row": f["row"], "reason": f["reason"]} for f in failed_rows[:50]],
+        "warnings": warning_rows[:50],
     }
 
 
