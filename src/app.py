@@ -15,6 +15,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Optional
 
+import psycopg
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,14 +40,21 @@ BASE_DIR = Path(__file__).resolve().parent
 
 # Vercel 같은 서버리스 환경은 배포 번들이 읽기 전용이고 /tmp만 쓰기 가능하다.
 # 그 /tmp도 요청마다 다른 인스턴스에 뜰 수 있어 데이터가 언제든 초기화될 수 있으니,
-# 실사용이 아니라 데모/테스트 용도로만 이 경로를 쓴다는 점을 감안해야 한다.
+# DATABASE_URL이 있으면 Postgres를 원본으로 쓰고, 없으면(로컬 개발) SQLite를 쓴다.
 if os.environ.get("VERCEL"):
     DATA_ROOT = Path(tempfile.gettempdir())
 else:
     DATA_ROOT = BASE_DIR
 
-logger = ClaimLogger(base_dir=DATA_ROOT / "logs")
-store = ClaimsStore(base_dir=DATA_ROOT / "data", logger=logger)
+DATABASE_URL = os.environ.get("DATABASE_URL")
+if DATABASE_URL:
+    from claims_store_pg import PgClaimsStore
+
+    logger = None  # Postgres 백엔드는 CSV 이력 없이 claims 테이블에서 직접 통계를 집계한다
+    store = PgClaimsStore(database_url=DATABASE_URL)
+else:
+    logger = ClaimLogger(base_dir=DATA_ROOT / "logs")
+    store = ClaimsStore(base_dir=DATA_ROOT / "data", logger=logger)
 
 STATIC_DIR = BASE_DIR / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -165,7 +173,7 @@ async def import_claims(file: UploadFile = File(...)):
                 warning_rows.append({"claim_id": row["claim_id"], "warnings": warnings})
         except DuplicateClaim as e:
             duplicate_rows.append({"reason": f"기존 데이터와 동일 ({e.existing_claim_id})"})
-        except (ValueError, sqlite3.Error) as e:
+        except (ValueError, sqlite3.Error, psycopg.Error) as e:
             failed_rows.append({"row": None, "reason": str(e)})
 
     return {
@@ -210,36 +218,4 @@ def update_claim(claim_id: str, payload: ClaimUpdate):
 
 @app.get("/api/stats/summary")
 def stats_summary():
-    claims = store.list_claims()
-    open_count = sum(1 for c in claims if c["status"] != "완료")
-    in_progress = sum(1 for c in claims if c["status"] == "처리중")
-    received = sum(1 for c in claims if c["status"] == "접수")
-    done = sum(1 for c in claims if c["status"] == "완료")
-
-    monthly_rows = []
-    monthly_path = logger.monthly_dir
-    if monthly_path.exists():
-        files = sorted(monthly_path.glob("*_summary.csv"), reverse=True)
-        if files:
-            import csv as _csv
-
-            with files[0].open("r", newline="", encoding="utf-8-sig") as f:
-                monthly_rows = list(_csv.DictReader(f))
-
-    this_month_count = sum(int(r.get("claim_count") or 0) for r in monthly_rows)
-    this_month_cost = sum(float(r.get("total_cost_krw") or 0) for r in monthly_rows)
-
-    channel_breakdown: dict[str, int] = {}
-    for c in claims:
-        ch = c.get("channel") or "내부입력"
-        channel_breakdown[ch] = channel_breakdown.get(ch, 0) + 1
-
-    return {
-        "received": received,
-        "in_progress": in_progress,
-        "done": done,
-        "open_total": open_count,
-        "this_month_count": this_month_count,
-        "this_month_cost_krw": round(this_month_cost, 1),
-        "channel_breakdown": channel_breakdown,
-    }
+    return store.stats_summary()

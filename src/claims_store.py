@@ -263,6 +263,40 @@ class ClaimsStore:
             raise ClaimNotFound(claim_id)
         return dict(row)
 
+    def stats_summary(self) -> dict[str, Any]:
+        """대시보드 상단 통계. 이번달 처리건수·비용은 claim_logger가 쌓은 월별 CSV에서 읽는다."""
+        claims = self.list_claims()
+        open_count = sum(1 for c in claims if c["status"] != STATUS_DONE)
+        in_progress = sum(1 for c in claims if c["status"] == STATUS_IN_PROGRESS)
+        received = sum(1 for c in claims if c["status"] == STATUS_RECEIVED)
+        done = sum(1 for c in claims if c["status"] == STATUS_DONE)
+
+        monthly_rows: list[dict[str, Any]] = []
+        monthly_path = self.logger.monthly_dir
+        if monthly_path.exists():
+            files = sorted(monthly_path.glob("*_summary.csv"), reverse=True)
+            if files:
+                with files[0].open("r", newline="", encoding="utf-8-sig") as f:
+                    monthly_rows = list(csv.DictReader(f))
+
+        this_month_count = sum(int(r.get("claim_count") or 0) for r in monthly_rows)
+        this_month_cost = sum(float(r.get("total_cost_krw") or 0) for r in monthly_rows)
+
+        channel_breakdown: dict[str, int] = {}
+        for c in claims:
+            ch = c.get("channel") or CHANNEL_INTERNAL
+            channel_breakdown[ch] = channel_breakdown.get(ch, 0) + 1
+
+        return {
+            "received": received,
+            "in_progress": in_progress,
+            "done": done,
+            "open_total": open_count,
+            "this_month_count": this_month_count,
+            "this_month_cost_krw": round(this_month_cost, 1),
+            "channel_breakdown": channel_breakdown,
+        }
+
     def update_claim(self, claim_id: str, updates: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
             current = self._conn.execute("SELECT * FROM claims WHERE claim_id = ?", (claim_id,)).fetchone()
