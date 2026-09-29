@@ -231,6 +231,7 @@ class ClaimsStore:
         status: Optional[str] = None,
         assignee: Optional[str] = None,
         channel: Optional[str] = None,
+        contact: Optional[str] = None,
         q: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         clauses = []
@@ -244,6 +245,11 @@ class ClaimsStore:
         if channel:
             clauses.append("channel = ?")
             params.append(channel)
+        if contact:
+            # 하이픈 유무와 상관없이 찾을 수 있도록 저장값·검색어 둘 다 숫자만 남겨 비교한다.
+            clauses.append("REPLACE(contact, '-', '') LIKE ?")
+            digits_only = "".join(ch for ch in contact if ch.isdigit())
+            params.append(f"%{digits_only}%")
         if q:
             clauses.append("(customer LIKE ? OR product LIKE ? OR description LIKE ?)")
             like = f"%{q}%"

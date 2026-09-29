@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>클레임 통합관리 시스템</title>
-<link rel="stylesheet" href="/static/style.css" />
+<link rel="stylesheet" href="/static/style.css?v=2" />
 </head>
 <body>
 <header>
@@ -22,9 +22,10 @@
     <form id="claim-form">
       <div class="row">
         <label>고객사 <input name="customer" required /></label>
-        <label>제품/모델 <input name="product" required /></label>
+        <label>연락처 <input name="contact" id="internal-contact-input" placeholder="010-0000-0000" inputmode="numeric" /></label>
       </div>
       <div class="row">
+        <label>제품/모델 <input name="product" required /></label>
         <label>원인 유형
           <select name="category">
             <option value="">미분류</option>
@@ -82,6 +83,7 @@
         </select>
       </label>
       <label>담당자 <input id="filter-assignee" placeholder="내 이름으로 검색" /></label>
+      <label>연락처 <input id="filter-contact" placeholder="하이픈 없이 검색 가능" inputmode="numeric" /></label>
       <label>검색 <input id="filter-q" placeholder="고객사 / 제품 / 내용" /></label>
       <button id="refresh-btn" type="button">새로고침</button>
     </div>
@@ -99,6 +101,7 @@
   </section>
 </main>
 
-<script src="/static/app.js"></script>
+<script src="/static/phone-format.js?v=2"></script>
+<script src="/static/app.js?v=3"></script>
 </body>
 </html>

@@ -80,6 +80,19 @@ def test_list_claims_filters_by_assignee_partial_match(store):
     assert results[0]["claim_id"] == a["claim_id"]
 
 
+def test_list_claims_filters_by_contact_ignoring_hyphens(store):
+    a = store.create_claim({"customer": "A", "product": "P", "description": "D", "contact": "010-9876-5432"})
+    store.create_claim({"customer": "B", "product": "P", "description": "D", "contact": "010-1111-2222"})
+
+    results_no_hyphen = store.list_claims(contact="98765432")
+    assert len(results_no_hyphen) == 1
+    assert results_no_hyphen[0]["claim_id"] == a["claim_id"]
+
+    results_with_hyphen = store.list_claims(contact="010-9876")
+    assert len(results_with_hyphen) == 1
+    assert results_with_hyphen[0]["claim_id"] == a["claim_id"]
+
+
 def test_import_claim_accepts_historical_status_and_date(store):
     row = store.import_claim(
         {

@@ -71,6 +71,14 @@ def test_list_claims_assignee_partial_match_case_insensitive(store):
     assert results[0]["claim_id"] == a["claim_id"]
 
 
+def test_list_claims_filters_by_contact_ignoring_hyphens(store):
+    a = store.create_claim({"customer": "A", "product": "P", "description": "D", "contact": "010-9876-5432"})
+    store.create_claim({"customer": "B", "product": "P", "description": "D", "contact": "010-1111-2222"})
+    results = store.list_claims(contact="98765432")
+    assert len(results) == 1
+    assert results[0]["claim_id"] == a["claim_id"]
+
+
 def test_stats_summary_reflects_completed_this_month(store):
     row = store.create_claim({"customer": "A", "product": "P", "description": "D", "cost_krw": 100})
     store.update_claim(row["claim_id"], {"status": STATUS_DONE})

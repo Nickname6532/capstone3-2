@@ -60,6 +60,19 @@ STATIC_DIR = BASE_DIR / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
+@app.middleware("http")
+async def no_cache_static(request, call_next):
+    """정적 파일(HTML/CSS/JS)을 항상 재검증하게 한다.
+
+    개발 중 자주 바뀌는 소규모 프로젝트라 브라우저가 이전 버전을 계속
+    캐시해서 수정사항이 반영 안 된 것처럼 보이는 문제가 실제로 있었다.
+    """
+    response = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/") or request.url.path == "/submit":
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    return response
+
+
 class ClaimCreate(BaseModel):
     customer: str
     product: str
@@ -192,9 +205,10 @@ def list_claims(
     status: Optional[str] = None,
     assignee: Optional[str] = None,
     channel: Optional[str] = None,
+    contact: Optional[str] = None,
     q: Optional[str] = None,
 ):
-    return store.list_claims(status=status, assignee=assignee, channel=channel, q=q)
+    return store.list_claims(status=status, assignee=assignee, channel=channel, contact=contact, q=q)
 
 
 @app.get("/api/claims/{claim_id}")

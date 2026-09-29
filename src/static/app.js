@@ -4,7 +4,10 @@ const form = document.getElementById("claim-form");
 const filterStatus = document.getElementById("filter-status");
 const filterChannel = document.getElementById("filter-channel");
 const filterAssignee = document.getElementById("filter-assignee");
+const filterContact = document.getElementById("filter-contact");
 const filterQ = document.getElementById("filter-q");
+
+attachPhoneAutoFormat(document.getElementById("internal-contact-input"));
 
 async function loadStats() {
   const res = await fetch("/api/stats/summary");
@@ -34,6 +37,7 @@ async function loadClaims() {
   if (filterStatus.value) params.set("status", filterStatus.value);
   if (filterChannel.value) params.set("channel", filterChannel.value);
   if (filterAssignee.value) params.set("assignee", filterAssignee.value);
+  if (filterContact.value) params.set("contact", filterContact.value);
   if (filterQ.value) params.set("q", filterQ.value);
   const res = await fetch("/api/claims?" + params.toString());
   const claims = await res.json();
@@ -162,6 +166,7 @@ document.getElementById("refresh-btn").addEventListener("click", loadClaims);
 filterStatus.addEventListener("change", loadClaims);
 filterChannel.addEventListener("change", loadClaims);
 filterAssignee.addEventListener("input", debounce(loadClaims, 300));
+filterContact.addEventListener("input", debounce(loadClaims, 300));
 filterQ.addEventListener("input", debounce(loadClaims, 300));
 
 function debounce(fn, ms) {

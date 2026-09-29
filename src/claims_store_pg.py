@@ -175,6 +175,7 @@ class PgClaimsStore:
         status: Optional[str] = None,
         assignee: Optional[str] = None,
         channel: Optional[str] = None,
+        contact: Optional[str] = None,
         q: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         clauses = []
@@ -188,6 +189,10 @@ class PgClaimsStore:
         if channel:
             clauses.append("channel = %s")
             params.append(channel)
+        if contact:
+            clauses.append("REPLACE(contact, '-', '') LIKE %s")
+            digits_only = "".join(ch for ch in contact if ch.isdigit())
+            params.append(f"%{digits_only}%")
         if q:
             clauses.append("(customer ILIKE %s OR product ILIKE %s OR description ILIKE %s)")
             like = f"%{q}%"
