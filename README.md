@@ -15,6 +15,17 @@ cd src
 - 내부 대시보드: http://localhost:8000
 - 고객 접수 폼: http://localhost:8000/submit
 
+## 테스트
+
+```bash
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m pytest tests/ -v
+```
+
+`tests/`는 `tmp_path`로 격리된 임시 DB를 쓰기 때문에 `src/data`, `src/logs`의 실제 개발 데이터는
+건드리지 않는다. 상태 전이 규칙, 채널 검증, 담당자 검색, 일괄 가져오기(중복·인코딩·손상 파일 처리),
+REST API 응답 코드를 검증한다.
+
 ## 구조
 
 - `src/app.py` — FastAPI 백엔드 (REST API + 정적 대시보드 서빙)
