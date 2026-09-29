@@ -13,9 +13,27 @@ from __future__ import annotations
 import threading
 from datetime import datetime
 from typing import Any, Optional
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import psycopg
 from psycopg.rows import dict_row
+
+# libpq(=psycopg)가 실제로 알아듣는 연결 파라미터만 통과시킨다. Vercel의 Supabase
+# 연동이 넣어주는 URL에는 "supa" 같은 자체 메타데이터 쿼리 파라미터가 섞여 있는데,
+# psycopg는 모르는 파라미터가 하나라도 있으면 URI 파싱 단계에서 바로 예외를 던진다
+# (실제로 "invalid URI query parameter: 'supa'"로 배포가 통째로 죽었다).
+_ALLOWED_QUERY_KEYS = {
+    "sslmode", "sslrootcert", "sslcert", "sslkey", "sslpassword",
+    "application_name", "connect_timeout", "options",
+    "target_session_attrs", "channel_binding", "gssencmode",
+    "keepalives", "keepalives_idle", "keepalives_interval", "keepalives_count",
+}
+
+
+def _sanitize_conninfo(url: str) -> str:
+    parts = urlsplit(url)
+    kept = [(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True) if k.lower() in _ALLOWED_QUERY_KEYS]
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment))
 
 from claims_store import (
     CHANNEL_IMPORT,
@@ -58,7 +76,7 @@ CREATE INDEX IF NOT EXISTS idx_claims_channel ON claims(channel);
 
 class PgClaimsStore:
     def __init__(self, database_url: str):
-        self.database_url = database_url
+        self.database_url = _sanitize_conninfo(database_url)
         self._lock = threading.Lock()
         self._conn: Optional[psycopg.Connection] = None
         self._ensure_conn()
