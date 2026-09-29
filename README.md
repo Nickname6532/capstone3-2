@@ -3,29 +3,6 @@
 고객 클레임 접수부터 처리 결과까지 한 곳에서 관리하는 시스템. 구두 보고로만 오가던 클레임 처리 현황을
 접수(내부입력/웹/앱/문자) → 상태 추적(접수/처리중/완료) → 결과 이력(일/월/년 CSV)으로 정리한다.
 
-## 로컬 실행
-
-```bash
-python3 -m venv .venv
-.venv/bin/pip install -r requirements.txt
-cd src
-../.venv/bin/uvicorn app:app --reload --port 8000
-```
-
-- 내부 대시보드: http://localhost:8000
-- 고객 접수 폼: http://localhost:8000/submit
-
-## 테스트
-
-```bash
-.venv/bin/pip install -r requirements-dev.txt
-.venv/bin/python -m pytest tests/ -v
-```
-
-`tests/`는 `tmp_path`로 격리된 임시 DB를 쓰기 때문에 `src/data`, `src/logs`의 실제 개발 데이터는
-건드리지 않는다. 상태 전이 규칙, 채널 검증, 담당자 검색, 일괄 가져오기(중복·인코딩·손상 파일 처리),
-REST API 응답 코드를 검증한다.
-
 ## 구조
 
 - `src/app.py` — FastAPI 백엔드 (REST API + 정적 대시보드 서빙)
