@@ -21,7 +21,8 @@
 
 ## 저장소
 
-`DATABASE_URL` 환경변수 유무로 백엔드가 자동으로 갈린다.
+`DATABASE_URL`(없으면 `POSTGRES_URL` → `POSTGRES_URL_NON_POOLING` → `POSTGRES_PRISMA_URL` 순으로 확인,
+Vercel의 Supabase/Neon 연동이 실제로 쓰는 이름들) 환경변수 유무로 백엔드가 자동으로 갈린다.
 
 - **없음 (로컬 개발 기본값)** — SQLite(`data/claims.db`). 여러 담당자가 동시에 접속해도 파일 전체를
   다시 쓰던 CSV 방식과 달리 행 단위 트랜잭션으로 안전하게 갱신된다. 이전에 CSV로 쓰던 데이터
@@ -33,17 +34,21 @@
 ## Vercel 배포 시 주의 — 반드시 Postgres를 붙여야 데이터가 유지된다
 
 Vercel 서버리스 환경은 배포 파일이 읽기 전용이고 `/tmp`만 쓰기 가능한데, 그 `/tmp`도 인스턴스마다
-다르고 언제든 초기화된다. **`DATABASE_URL`을 설정하지 않으면 SQLite 파일이 `/tmp`에 저장되어, 요청이
+다르고 언제든 초기화된다. **Postgres 연동이 안 되어 있으면 SQLite 파일이 `/tmp`에 저장되어, 요청이
 다른 인스턴스로 가거나 인스턴스가 재활용되는 순간 클레임 목록이 사라진다** — 실제로 시연 중 겪었던
 문제가 이것이다.
 
-**해결: Vercel 프로젝트에 Postgres를 붙이고 `DATABASE_URL`을 설정한다.**
+**해결: Vercel 프로젝트에 Postgres를 붙인다 (Supabase 또는 Neon 둘 다 됨).**
 
-1. Vercel 대시보드 → 해당 프로젝트 → **Storage** 탭 → **Create Database** → Postgres(Neon 제공) 선택
-2. 생성하면 `DATABASE_URL`(및 관련 변수)이 프로젝트 환경변수에 자동으로 추가된다 — 별도로 값을 복사해
-   넣을 필요 없음
+1. Vercel 대시보드 → 해당 프로젝트 → **Storage** 탭 → **Create Database** → **Supabase**(또는 Neon) 선택
+2. 연결하면 프로젝트 환경변수에 관련 변수가 자동으로 추가된다 — Supabase는 `POSTGRES_URL` 계열 이름을
+   쓰고 Neon은 `DATABASE_URL`을 쓰는데, 앱이 둘 다 자동으로 찾는다. 별도로 값을 복사해 넣을 필요 없음
 3. 재배포(Redeploy)하면 앱이 기동 시 자동으로 `claims` 테이블을 만들고 Postgres를 원본으로 사용한다
 4. 이후로는 인스턴스가 바뀌거나 콜드 스타트가 나도 클레임 데이터가 유지된다
+
+**연동했는데도 데이터가 계속 사라진다면**: Vercel 프로젝트 Settings → Environment Variables에서
+`POSTGRES_URL`(또는 `DATABASE_URL`)이 실제로 등록되어 있는지, 그리고 **Production** 환경에도 체크되어
+있는지 확인한다. Preview에만 연결돼 있으면 실제 배포 도메인(Production)은 여전히 SQLite로 폴백된다.
 
 로컬에서 Postgres 백엔드를 직접 테스트하려면:
 
