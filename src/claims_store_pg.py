@@ -70,7 +70,12 @@ class PgClaimsStore:
     def _ensure_conn(self) -> psycopg.Connection:
         """연결이 끊겼으면(서버리스 웜 인스턴스 재사용 중 idle timeout 등) 새로 연다."""
         if self._conn is None or self._conn.closed:
-            self._conn = psycopg.connect(self.database_url, row_factory=dict_row, autocommit=False)
+            # prepare_threshold=None: Supabase/PgBouncer의 커넥션 풀러(트랜잭션 모드)는
+            # 서버사이드 prepared statement를 커넥션 간에 유지하지 않아서, 기본값대로 두면
+            # "prepared statement already exists" 류 오류가 날 수 있어 아예 끈다.
+            self._conn = psycopg.connect(
+                self.database_url, row_factory=dict_row, autocommit=False, prepare_threshold=None
+            )
         return self._conn
 
     def _execute(self, sql: str, params: tuple = ()) -> psycopg.Cursor:

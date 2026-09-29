@@ -46,7 +46,16 @@ if os.environ.get("VERCEL"):
 else:
     DATA_ROOT = BASE_DIR
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+# Vercel의 Supabase 연동(Storage 탭에서 붙이는 방식)은 DATABASE_URL이 아니라
+# POSTGRES_URL / POSTGRES_PRISMA_URL 같은 이름으로 환경변수를 넣어준다. DATABASE_URL만
+# 보고 있으면 Supabase를 붙여도 계속 SQLite(=/tmp, 휘발성)로 폴백되어 데이터가
+# 그대로 사라진다 — 실제로 겪었던 문제라 여러 이름을 다 확인한다.
+DATABASE_URL = (
+    os.environ.get("DATABASE_URL")
+    or os.environ.get("POSTGRES_URL")
+    or os.environ.get("POSTGRES_URL_NON_POOLING")
+    or os.environ.get("POSTGRES_PRISMA_URL")
+)
 if DATABASE_URL:
     from claims_store_pg import PgClaimsStore
 
