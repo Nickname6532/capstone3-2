@@ -10,6 +10,25 @@
 - `src/claim_logger.py` — 완료된 클레임을 일/월/년 CSV로 적재 (리포팅·통계용, 마스터 데이터는 아님)
 - `src/static/` — 내부 대시보드(`index.html`) + 고객 접수 폼(`submit.html`)
 - `api/index.py`, `vercel.json` — Vercel 서버리스 배포용 진입점
+- `Dockerfile`, `docker-compose.yml`, `nginx/` — Docker + nginx로 상시 서버 배포할 때 쓰는 구성
+
+## Docker로 실행 (nginx 리버스 프록시 포함)
+
+```bash
+docker compose up -d --build
+```
+
+nginx가 80(컨테이너 기준, 호스트는 `8080`)에서 `/`, `/submit`, `/static`, `/api/*`를 모두 받아
+FastAPI 컨테이너로 리버스 프록시한다. http://localhost:8080 으로 접속.
+
+외부에 임시로 공개하려면(예: 데모):
+
+```bash
+cloudflared tunnel --url http://localhost:8080
+```
+
+계정 없이도 `https://<임의문자열>.trycloudflare.com` 주소가 바로 발급된다. 다만 이 임시 터널은
+Cloudflare가 가동을 보장하지 않으니 중요한 시연 전에는 미리 접속 테스트를 해볼 것.
 
 ## 접수 채널
 
