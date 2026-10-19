@@ -16,12 +16,12 @@ async function loadStats() {
     .map(([ch, n]) => `${ch} ${n}`)
     .join(" · ");
   statsEl.innerHTML = `
-    <div class="stat-card"><div class="label">접수</div><div class="value">${s.received}</div></div>
-    <div class="stat-card"><div class="label">처리중</div><div class="value">${s.in_progress}</div></div>
-    <div class="stat-card"><div class="label">완료</div><div class="value">${s.done}</div></div>
-    <div class="stat-card"><div class="label">이번달 처리건수</div><div class="value">${s.this_month_count}</div></div>
-    <div class="stat-card"><div class="label">이번달 LLM 비용</div><div class="value">${s.this_month_cost_krw}원</div></div>
-    <div class="stat-card"><div class="label">채널별 누적</div><div class="value" style="font-size:13px; font-weight:500;">${channelLine || "-"}</div></div>
+    <div class="board-seg"><span class="label"><span class="dot 접수"></span>접수</span><span class="value num">${s.received}</span></div>
+    <div class="board-seg"><span class="label"><span class="dot 처리중"></span>처리중</span><span class="value num">${s.in_progress}</span></div>
+    <div class="board-seg"><span class="label"><span class="dot 완료"></span>완료</span><span class="value num">${s.done}</span></div>
+    <div class="board-seg"><span class="label">이번달 처리</span><span class="value num">${s.this_month_count}</span></div>
+    <div class="board-seg"><span class="label">이번달 비용</span><span class="value num">${s.this_month_cost_krw}<span style="font-size:16px;">원</span></span></div>
+    <div class="board-seg"><span class="label">채널별 누적</span><span class="value small">${channelLine || "-"}</span></div>
   `;
 }
 
@@ -43,17 +43,17 @@ async function loadClaims() {
   const claims = await res.json();
 
   claimsBody.innerHTML = claims.map(c => `
-    <tr data-id="${c.claim_id}">
-      <td>${c.claim_id}</td>
-      <td>${c.created_at}</td>
+    <tr data-id="${c.claim_id}" class="s-${c.status}">
+      <td class="num">${c.claim_id}</td>
+      <td class="num">${c.created_at}</td>
       <td>${escapeHtml(c.channel || "내부입력")}</td>
       <td>${escapeHtml(c.customer)}</td>
-      <td>${escapeHtml(c.contact || "-")}</td>
+      <td class="num">${escapeHtml(c.contact || "-")}</td>
       <td>${escapeHtml(c.product)}</td>
       <td>${escapeHtml(c.category || "-")}</td>
       <td class="desc-cell">${escapeHtml(c.description)}</td>
       <td><input class="assignee-input" value="${escapeHtml(c.assignee || "")}" placeholder="미배정" ${c.status === "완료" ? "disabled" : ""}/></td>
-      <td><span class="badge ${c.status}">${c.status}</span></td>
+      <td><span class="status-word s-${c.status}">${c.status}</span></td>
       <td class="actions">
         <select class="status-select" ${c.status === "완료" ? "disabled" : ""}>${statusOptions(c.status)}</select>
         <button class="save-btn" ${c.status === "완료" ? "disabled" : ""}>저장</button>

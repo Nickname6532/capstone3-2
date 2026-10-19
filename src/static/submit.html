@@ -4,38 +4,112 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>클레임 접수</title>
-<link rel="stylesheet" href="/static/style.css?v=2" />
+<link rel="stylesheet" href="/static/style.css?v=4" />
 <style>
-  main.narrow { max-width: 480px; }
-  .success { display: none; text-align: center; padding: 40px 10px; }
-  .success .icon { font-size: 40px; }
-  .claim-id { font-weight: 700; color: var(--accent); }
+  main.narrow { max-width: 440px; }
+
+  .lede {
+    margin: 0 0 20px;
+    font-size: 15px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  .success { display: none; }
+
+  .ticket {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    padding: 0;
+  }
+
+  .ticket-top {
+    padding: 28px 24px 22px;
+    text-align: center;
+  }
+
+  .ticket-top .ok {
+    font-size: 12px;
+    color: var(--moss);
+    font-weight: 500;
+    margin: 0 0 6px;
+  }
+
+  .ticket-top h2 {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 600;
+  }
+
+  .perf {
+    height: 1px;
+    background-image: repeating-linear-gradient(
+      to right, var(--line) 0, var(--line) 6px, transparent 6px, transparent 12px
+    );
+  }
+
+  .ticket-number {
+    padding: 26px 24px 30px;
+    text-align: center;
+  }
+
+  .ticket-number .label {
+    font-size: 11.5px;
+    color: var(--muted);
+    margin: 0 0 8px;
+  }
+
+  .ticket-number .id {
+    font-family: var(--font-num);
+    font-size: 30px;
+    font-weight: 700;
+    color: var(--amber);
+    letter-spacing: 0.02em;
+    word-break: break-all;
+  }
+
+  .ticket-foot {
+    margin: 16px 0 0;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
 </style>
 </head>
 <body>
 <header>
   <h1>클레임 접수</h1>
+  <p class="sub">문제를 알려주시면 담당자가 확인합니다</p>
 </header>
 
 <main class="narrow">
-  <section class="panel" id="form-panel">
-    <p style="color: var(--muted); margin-top: 0;">불편사항을 남겨주시면 담당자가 확인 후 처리해 드립니다.</p>
-    <form id="public-claim-form">
-      <label>업체/성함 <input name="customer" required /></label>
-      <label>연락처 <input name="contact" id="contact-input" required placeholder="010-0000-0000" inputmode="numeric" /></label>
-      <label>제품/모델 <input name="product" required /></label>
-      <label>불편 내용
-        <textarea name="description" rows="4" required placeholder="어떤 문제가 있으셨는지 적어주세요"></textarea>
-      </label>
-      <button type="submit">접수하기</button>
-    </form>
+  <section id="form-panel">
+    <p class="lede">불편하셨던 내용을 적어주시면 담당자가 확인 후 순서대로 연락드립니다.</p>
+    <div class="panel">
+      <form id="public-claim-form">
+        <label>업체/성함 <input name="customer" required /></label>
+        <label>연락처 <input name="contact" id="contact-input" required placeholder="010-0000-0000" inputmode="numeric" /></label>
+        <label>제품/모델 <input name="product" required /></label>
+        <label>불편 내용
+          <textarea name="description" rows="4" required placeholder="어떤 문제가 있으셨는지 적어주세요"></textarea>
+        </label>
+        <button type="submit" class="primary">접수하기</button>
+      </form>
+    </div>
   </section>
 
-  <section class="panel success" id="success-panel">
-    <div class="icon">✅</div>
-    <p>접수가 완료되었습니다.</p>
-    <p>접수번호 <span class="claim-id" id="result-claim-id"></span></p>
-    <p style="color: var(--muted); font-size: 13px;">담당자 확인 후 순차적으로 연락드립니다.</p>
+  <section class="success" id="success-panel">
+    <div class="ticket">
+      <div class="ticket-top">
+        <p class="ok">접수 완료</p>
+        <h2>번호를 확인해주세요</h2>
+      </div>
+      <div class="perf"></div>
+      <div class="ticket-number">
+        <p class="label">접수번호</p>
+        <p class="id" id="result-claim-id"></p>
+      </div>
+    </div>
+    <p class="ticket-foot">담당자 확인 후 순서대로 연락드립니다. 이 번호로 진행 상황을 문의하실 수 있습니다.</p>
   </section>
 </main>
 
