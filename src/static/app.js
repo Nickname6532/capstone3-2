@@ -9,8 +9,30 @@ const filterQ = document.getElementById("filter-q");
 
 attachPhoneAutoFormat(document.getElementById("internal-contact-input"));
 
+async function apiFetch(url, options) {
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    location.href = "/login";
+    throw new Error("로그인이 필요합니다");
+  }
+  return res;
+}
+
+async function loadUser() {
+  const res = await apiFetch("/api/auth/me");
+  const me = await res.json();
+  const adminLink = me.role === "admin" ? ` · <a href="/admin">계정 관리</a>` : "";
+  document.getElementById("user-box").innerHTML =
+    `${escapeHtml(me.display_name)}님 (${escapeHtml(me.role)})${adminLink} · <a href="#" id="logout-link">로그아웃</a>`;
+  document.getElementById("logout-link").addEventListener("click", async (e) => {
+    e.preventDefault();
+    await fetch("/api/auth/logout", { method: "POST" });
+    location.href = "/login";
+  });
+}
+
 async function loadStats() {
-  const res = await fetch("/api/stats/summary");
+  const res = await apiFetch("/api/stats/summary");
   const s = await res.json();
   const channelLine = Object.entries(s.channel_breakdown || {})
     .map(([ch, n]) => `${ch} ${n}`)
@@ -39,7 +61,7 @@ async function loadClaims() {
   if (filterAssignee.value) params.set("assignee", filterAssignee.value);
   if (filterContact.value) params.set("contact", filterContact.value);
   if (filterQ.value) params.set("q", filterQ.value);
-  const res = await fetch("/api/claims?" + params.toString());
+  const res = await apiFetch("/api/claims?" + params.toString());
   const claims = await res.json();
 
   claimsBody.innerHTML = claims.map(c => `
@@ -72,7 +94,7 @@ async function loadClaims() {
 }
 
 async function updateClaim(id, updates) {
-  const res = await fetch(`/api/claims/${id}`, {
+  const res = await apiFetch(`/api/claims/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(updates),
@@ -97,7 +119,7 @@ form.addEventListener("submit", async (e) => {
   const payload = Object.fromEntries(fd.entries());
   payload.amount_krw = Number(payload.amount_krw || 0);
 
-  const res = await fetch("/api/claims", {
+  const res = await apiFetch("/api/claims", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -128,7 +150,7 @@ document.getElementById("import-btn").addEventListener("click", async () => {
   fd.append("file", file);
 
   try {
-    const res = await fetch("/api/claims/import", { method: "POST", body: fd });
+    const res = await apiFetch("/api/claims/import", { method: "POST", body: fd });
     const data = await res.json();
     if (!res.ok) {
       resultEl.innerHTML = `<p style="color: var(--danger);">가져오기 실패: ${escapeHtml(data.detail || res.status)}</p>`;
@@ -177,5 +199,6 @@ function debounce(fn, ms) {
   };
 }
 
+loadUser();
 loadStats();
 loadClaims();

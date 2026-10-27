@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>계정 관리</title>
+<link rel="stylesheet" href="/static/style.css?v=4" />
+</head>
+<body>
+<header>
+  <h1>계정 관리</h1>
+  <p class="sub"><a href="/">← 현황판으로</a></p>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="panel-head">
+      <h2>새 계정 만들기</h2>
+      <p class="hint">아이디는 영문/숫자/._ 3~32자, 비밀번호는 10자 이상(숫자+문자 혼합)</p>
+    </div>
+    <form id="create-form">
+      <div class="row">
+        <label>아이디 <input name="username" required /></label>
+        <label>표시 이름 <input name="display_name" placeholder="홍길동" /></label>
+      </div>
+      <div class="row">
+        <label>비밀번호 <input name="password" type="password" required /></label>
+        <label>권한
+          <select name="role">
+            <option value="staff" selected>staff (담당자)</option>
+            <option value="admin">admin (관리자)</option>
+          </select>
+        </label>
+      </div>
+      <button type="submit" class="primary">계정 생성</button>
+    </form>
+    <p id="create-result" style="font-size: 13px; margin-top: 10px;"></p>
+  </section>
+
+  <section class="panel">
+    <h2>계정 목록</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>아이디</th><th>표시 이름</th><th>권한</th><th>상태</th><th>생성일</th><th>최근 로그인</th></tr>
+        </thead>
+        <tbody id="accounts-body"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  }
+
+  async function requireAdmin() {
+    const res = await fetch("/api/auth/me");
+    if (!res.ok) { location.href = "/login"; return null; }
+    const me = await res.json();
+    if (me.role !== "admin") { location.href = "/"; return null; }
+    return me;
+  }
+
+  async function loadAccounts() {
+    const res = await fetch("/api/admin/accounts");
+    if (res.status === 401) { location.href = "/login"; return; }
+    const accounts = await res.json();
+    document.getElementById("accounts-body").innerHTML = accounts.map(a => `
+      <tr>
+        <td class="num">${escapeHtml(a.username)}</td>
+        <td>${escapeHtml(a.display_name || "-")}</td>
+        <td>${escapeHtml(a.role)}</td>
+        <td>${a.is_active ? "활성" : "비활성"}</td>
+        <td class="num">${escapeHtml(a.created_at)}</td>
+        <td class="num">${escapeHtml(a.last_login_at || "-")}</td>
+      </tr>
+    `).join("");
+  }
+
+  document.getElementById("create-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const fd = new FormData(form);
+    const payload = Object.fromEntries(fd.entries());
+    const resultEl = document.getElementById("create-result");
+    resultEl.textContent = "";
+    resultEl.style.color = "";
+
+    const res = await fetch("/api/admin/accounts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      resultEl.textContent = err.detail || "생성 실패";
+      resultEl.style.color = "var(--coral)";
+      return;
+    }
+    const account = await res.json();
+    resultEl.textContent = `${account.username} 계정이 생성되었습니다.`;
+    resultEl.style.color = "var(--moss)";
+    form.reset();
+    await loadAccounts();
+  });
+
+  (async () => {
+    const me = await requireAdmin();
+    if (me) await loadAccounts();
+  })();
+</script>
+</body>
+</html>

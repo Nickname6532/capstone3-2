@@ -11,7 +11,7 @@ DATABASE_URL 환경변수 유무만 보고 둘 중 하나를 고르면 된다. V
 from __future__ import annotations
 
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Optional
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
@@ -71,6 +71,18 @@ CREATE TABLE IF NOT EXISTS claims (
 );
 CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
 CREATE INDEX IF NOT EXISTS idx_claims_channel ON claims(channel);
+
+CREATE TABLE IF NOT EXISTS accounts (
+    username TEXT PRIMARY KEY,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    last_login_at TEXT NOT NULL DEFAULT '',
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -321,3 +333,56 @@ class PgClaimsStore:
         ]
         next_seq = (max(seqs) + 1) if seqs else 1
         return f"{prefix}{next_seq:03d}"
+
+    # ------------------------------------------------------------------ #
+    # 계정 (로그인/관리자) — SQLite 버전(ClaimsStore)과 동일한 인터페이스
+    def create_account(self, username: str, password_hash: str, role: str, display_name: str = "") -> dict[str, Any]:
+        with self._lock:
+            cur = self._execute("SELECT 1 FROM accounts WHERE username=%s", (username,))
+            if cur.fetchone():
+                raise ValueError(f"이미 존재하는 아이디입니다: {username}")
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._execute(
+                """INSERT INTO accounts (username, password_hash, role, display_name, is_active, created_at)
+                   VALUES (%s, %s, %s, %s, 1, %s)""",
+                (username, password_hash, role, display_name, now),
+            )
+            self._conn.commit()
+            return self._account_public(self.get_account(username))
+
+    def get_account(self, username: str) -> Optional[dict[str, Any]]:
+        cur = self._execute("SELECT * FROM accounts WHERE username=%s", (username,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_accounts(self) -> list[dict[str, Any]]:
+        cur = self._execute("SELECT * FROM accounts ORDER BY created_at")
+        return [self._account_public(dict(r)) for r in cur.fetchall()]
+
+    def record_login_result(self, username: str, success: bool, max_attempts: int = 5, lock_minutes: int = 15) -> None:
+        with self._lock:
+            now = datetime.now()
+            if success:
+                self._execute(
+                    "UPDATE accounts SET failed_attempts=0, locked_until='', last_login_at=%s WHERE username=%s",
+                    (now.strftime("%Y-%m-%d %H:%M:%S"), username),
+                )
+            else:
+                cur = self._execute("SELECT failed_attempts FROM accounts WHERE username=%s", (username,))
+                row = cur.fetchone()
+                if row is None:
+                    self._conn.commit()
+                    return
+                attempts = row["failed_attempts"] + 1
+                locked_until = ""
+                if attempts >= max_attempts:
+                    locked_until = (now + timedelta(minutes=lock_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+                self._execute(
+                    "UPDATE accounts SET failed_attempts=%s, locked_until=%s WHERE username=%s",
+                    (attempts, locked_until, username),
+                )
+            self._conn.commit()
+
+    @staticmethod
+    def _account_public(account: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in account.items() if k != "password_hash"}

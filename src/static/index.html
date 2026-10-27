@@ -7,9 +7,12 @@
 <link rel="stylesheet" href="/static/style.css?v=4" />
 </head>
 <body>
-<header>
-  <h1>고객 클레임 현황판</h1>
-  <p class="sub">접수 → 처리중 → 완료</p>
+<header style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
+  <div>
+    <h1>고객 클레임 현황판</h1>
+    <p class="sub">접수 → 처리중 → 완료</p>
+  </div>
+  <div id="user-box" style="font-size:12.5px; color:var(--muted); text-align:right;"></div>
 </header>
 
 <main>
@@ -103,6 +106,6 @@
 </main>
 
 <script src="/static/phone-format.js?v=2"></script>
-<script src="/static/app.js?v=4"></script>
+<script src="/static/app.js?v=5"></script>
 </body>
 </html>

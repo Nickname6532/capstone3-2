@@ -30,8 +30,61 @@ from claims_store_pg import PgClaimsStore
 def store():
     s = PgClaimsStore(database_url=TEST_DATABASE_URL)
     s._execute("TRUNCATE TABLE claims")
+    s._execute("TRUNCATE TABLE accounts")
     s._conn.commit()
     return s
+
+
+def test_create_and_get_account(store):
+    from auth import hash_password, verify_password
+
+    account = store.create_account("pgadmin", hash_password("PgAdminPass123"), "admin", "관리자")
+    assert "password_hash" not in account
+
+    full = store.get_account("pgadmin")
+    assert verify_password("PgAdminPass123", full["password_hash"])
+    assert not verify_password("wrong", full["password_hash"])
+
+
+def test_duplicate_account_rejected(store):
+    from auth import hash_password
+
+    store.create_account("dup1", hash_password("Password123"), "staff")
+    with pytest.raises(ValueError):
+        store.create_account("dup1", hash_password("Password123"), "staff")
+
+
+def test_record_login_result_locks_after_max_attempts(store):
+    from auth import hash_password
+
+    store.create_account("locktest", hash_password("LockTestPass123"), "staff")
+    for _ in range(5):
+        store.record_login_result("locktest", success=False)
+
+    account = store.get_account("locktest")
+    assert account["locked_until"] != ""
+
+
+def test_successful_login_resets_failed_attempts(store):
+    from auth import hash_password
+
+    store.create_account("resettest", hash_password("ResetTestPass123"), "staff")
+    store.record_login_result("resettest", success=False)
+    store.record_login_result("resettest", success=False)
+    store.record_login_result("resettest", success=True)
+
+    account = store.get_account("resettest")
+    assert account["failed_attempts"] == 0
+    assert account["locked_until"] == ""
+    assert account["last_login_at"] != ""
+
+
+def test_list_accounts_excludes_password_hash(store):
+    from auth import hash_password
+
+    store.create_account("listtest", hash_password("ListTestPass123"), "staff")
+    for account in store.list_accounts():
+        assert "password_hash" not in account
 
 
 def test_create_claim_defaults_to_received(store):

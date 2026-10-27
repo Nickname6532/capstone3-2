@@ -14,7 +14,7 @@ import csv
 import sqlite3
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -80,6 +80,18 @@ CREATE TABLE IF NOT EXISTS claims (
 );
 CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
 CREATE INDEX IF NOT EXISTS idx_claims_channel ON claims(channel);
+
+CREATE TABLE IF NOT EXISTS accounts (
+    username TEXT PRIMARY KEY,
+    password_hash TEXT NOT NULL,
+    role TEXT NOT NULL,
+    display_name TEXT NOT NULL DEFAULT '',
+    is_active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    last_login_at TEXT NOT NULL DEFAULT '',
+    failed_attempts INTEGER NOT NULL DEFAULT 0,
+    locked_until TEXT NOT NULL DEFAULT ''
+);
 """
 
 
@@ -415,3 +427,62 @@ class ClaimsStore:
         )
         self._conn.commit()
         legacy_csv.rename(legacy_csv.with_suffix(".csv.migrated"))
+
+    # ------------------------------------------------------------------ #
+    # 계정 (로그인/관리자)
+    #
+    # password_hash는 절대 이 메서드들 밖으로 반환하지 않는다 — list_accounts에서도
+    # 뺀다. 비밀번호 검증 자체는 auth.verify_password가 한다(여기선 저장·조회만).
+    ACCOUNT_FIELDS = (
+        "username", "password_hash", "role", "display_name", "is_active",
+        "created_at", "last_login_at", "failed_attempts", "locked_until",
+    )
+
+    def create_account(self, username: str, password_hash: str, role: str, display_name: str = "") -> dict[str, Any]:
+        with self._lock:
+            if self._conn.execute("SELECT 1 FROM accounts WHERE username=?", (username,)).fetchone():
+                raise ValueError(f"이미 존재하는 아이디입니다: {username}")
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._conn.execute(
+                """INSERT INTO accounts (username, password_hash, role, display_name, is_active, created_at)
+                   VALUES (?, ?, ?, ?, 1, ?)""",
+                (username, password_hash, role, display_name, now),
+            )
+            self._conn.commit()
+            return self._account_public(self.get_account(username))
+
+    def get_account(self, username: str) -> Optional[dict[str, Any]]:
+        """비밀번호 해시를 포함한 전체 행. 로그인 검증 전용 — 응답에 그대로 내보내지 말 것."""
+        row = self._conn.execute("SELECT * FROM accounts WHERE username=?", (username,)).fetchone()
+        return dict(row) if row else None
+
+    def list_accounts(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute("SELECT * FROM accounts ORDER BY created_at").fetchall()
+        return [self._account_public(dict(r)) for r in rows]
+
+    def record_login_result(self, username: str, success: bool, max_attempts: int = 5, lock_minutes: int = 15) -> None:
+        with self._lock:
+            now = datetime.now()
+            if success:
+                self._conn.execute(
+                    "UPDATE accounts SET failed_attempts=0, locked_until='', last_login_at=? WHERE username=?",
+                    (now.strftime("%Y-%m-%d %H:%M:%S"), username),
+                )
+            else:
+                row = self._conn.execute("SELECT failed_attempts FROM accounts WHERE username=?", (username,)).fetchone()
+                if row is None:
+                    self._conn.commit()
+                    return
+                attempts = row["failed_attempts"] + 1
+                locked_until = ""
+                if attempts >= max_attempts:
+                    locked_until = (now + timedelta(minutes=lock_minutes)).strftime("%Y-%m-%d %H:%M:%S")
+                self._conn.execute(
+                    "UPDATE accounts SET failed_attempts=?, locked_until=? WHERE username=?",
+                    (attempts, locked_until, username),
+                )
+            self._conn.commit()
+
+    @staticmethod
+    def _account_public(account: dict[str, Any]) -> dict[str, Any]:
+        return {k: v for k, v in account.items() if k != "password_hash"}

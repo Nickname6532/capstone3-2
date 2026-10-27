@@ -4,69 +4,72 @@
 실행:
     .venv/bin/uvicorn app:app --reload --port 8000
     (src/ 디렉터리에서 실행)
+
+로그인: 최초 관리자 계정은 create_admin.py로 터미널에서 직접 만든다(코드에
+기본 비밀번호를 남기지 않기 위함). README의 "로그인/계정" 절 참고.
 """
 
 from __future__ import annotations
 
 import json
 import os
+import secrets
 import sqlite3
-import tempfile
+import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 import psycopg
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.middleware.sessions import SessionMiddleware
 
 import bulk_import
-from claim_logger import ClaimLogger
-from claims_store import (
-    CHANNEL_APP,
-    CHANNEL_INTERNAL,
-    CHANNEL_SMS,
-    CHANNEL_WEB,
-    ClaimNotFound,
-    ClaimsStore,
-    DuplicateClaim,
-    InvalidTransition,
+from auth import (
+    ROLE_ADMIN,
+    ROLE_STAFF,
+    hash_password,
+    validate_password_strength,
+    validate_username,
+    verify_password,
 )
+from claims_store import CHANNEL_APP, CHANNEL_INTERNAL, CHANNEL_SMS, CHANNEL_WEB, ClaimNotFound, DuplicateClaim, InvalidTransition
+from db import build_store, get_database_url
 
 app = FastAPI(title="클레임 통합관리 시스템")
 
 BASE_DIR = Path(__file__).resolve().parent
+IS_VERCEL = bool(os.environ.get("VERCEL"))
 
-# Vercel 같은 서버리스 환경은 배포 번들이 읽기 전용이고 /tmp만 쓰기 가능하다.
-# 그 /tmp도 요청마다 다른 인스턴스에 뜰 수 있어 데이터가 언제든 초기화될 수 있으니,
-# DATABASE_URL이 있으면 Postgres를 원본으로 쓰고, 없으면(로컬 개발) SQLite를 쓴다.
-if os.environ.get("VERCEL"):
-    DATA_ROOT = Path(tempfile.gettempdir())
-else:
-    DATA_ROOT = BASE_DIR
-
-# Vercel의 Supabase 연동(Storage 탭에서 붙이는 방식)은 DATABASE_URL이 아니라
-# POSTGRES_URL / POSTGRES_PRISMA_URL 같은 이름으로 환경변수를 넣어준다. DATABASE_URL만
-# 보고 있으면 Supabase를 붙여도 계속 SQLite(=/tmp, 휘발성)로 폴백되어 데이터가
-# 그대로 사라진다 — 실제로 겪었던 문제라 여러 이름을 다 확인한다.
-DATABASE_URL = (
-    os.environ.get("DATABASE_URL")
-    or os.environ.get("POSTGRES_URL")
-    or os.environ.get("POSTGRES_URL_NON_POOLING")
-    or os.environ.get("POSTGRES_PRISMA_URL")
-)
-if DATABASE_URL:
-    from claims_store_pg import PgClaimsStore
-
-    logger = None  # Postgres 백엔드는 CSV 이력 없이 claims 테이블에서 직접 통계를 집계한다
-    store = PgClaimsStore(database_url=DATABASE_URL)
-else:
-    logger = ClaimLogger(base_dir=DATA_ROOT / "logs")
-    store = ClaimsStore(base_dir=DATA_ROOT / "data", logger=logger)
+store, logger = build_store()
 
 STATIC_DIR = BASE_DIR / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# 세션 쿠키 서명 키. 반드시 환경변수로 고정값을 줘야 한다 — 특히 Vercel 서버리스는
+# 인스턴스마다 프로세스가 새로 뜨는데, 그때마다 키가 달라지면 한 인스턴스에서 로그인한
+# 세션을 다른 인스턴스가 검증하지 못해 로그인이 수시로 풀리는 문제가 생긴다.
+SESSION_SECRET = os.environ.get("SESSION_SECRET")
+if not SESSION_SECRET:
+    if IS_VERCEL:
+        print(
+            "경고: SESSION_SECRET 환경변수가 없습니다. 인스턴스마다 키가 달라져 로그인이 "
+            "수시로 풀립니다. Vercel 프로젝트 환경변수에 SESSION_SECRET을 추가하세요.",
+            file=sys.stderr,
+        )
+    SESSION_SECRET = secrets.token_hex(32)
+
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=SESSION_SECRET,
+    session_cookie="claim_session",
+    same_site="strict",
+    https_only=IS_VERCEL or bool(get_database_url()),
+    max_age=60 * 60 * 12,  # 12시간
+)
 
 
 @app.middleware("http")
@@ -77,9 +80,131 @@ async def no_cache_static(request, call_next):
     캐시해서 수정사항이 반영 안 된 것처럼 보이는 문제가 실제로 있었다.
     """
     response = await call_next(request)
-    if request.url.path == "/" or request.url.path.startswith("/static/") or request.url.path == "/submit":
+    no_cache_paths = {"/", "/submit", "/login", "/admin"}
+    if request.url.path in no_cache_paths or request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
+
+
+# ---------------------------------------------------------------------- #
+# 인증
+#
+# 세션엔 username/role/display_name만 담는다 — 비밀번호 해시 등 민감한 값은
+# 절대 세션(쿠키)에 넣지 않는다. 쿠키는 서명되어 있어 변조는 막히지만 암호화는
+# 아니라서 내용이 그대로 보인다.
+
+def current_user(request: Request) -> Optional[dict[str, str]]:
+    return request.session.get("user")
+
+
+def require_login(request: Request) -> dict[str, str]:
+    user = current_user(request)
+    if not user:
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다")
+    return user
+
+
+def require_admin(user: dict[str, str] = Depends(require_login)) -> dict[str, str]:
+    if user.get("role") != ROLE_ADMIN:
+        raise HTTPException(status_code=403, detail="관리자만 가능합니다")
+    return user
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class AccountCreate(BaseModel):
+    username: str
+    password: str
+    role: str = ROLE_STAFF
+    display_name: Optional[str] = ""
+
+
+@app.post("/api/auth/login")
+def login(payload: LoginRequest, request: Request):
+    account = store.get_account(payload.username)
+
+    locked_until = (account or {}).get("locked_until") or ""
+    if locked_until and locked_until > datetime.now().strftime("%Y-%m-%d %H:%M:%S"):
+        raise HTTPException(status_code=429, detail=f"로그인 시도가 많아 잠시 잠겼습니다. {locked_until} 이후 다시 시도하세요.")
+
+    password_hash = (account or {}).get("password_hash")
+    is_active = (account or {}).get("is_active", 1)
+    ok = verify_password(payload.password, password_hash) and bool(is_active)
+
+    if account:
+        store.record_login_result(payload.username, success=ok)
+
+    if not ok:
+        # 아이디가 없는 경우와 비밀번호가 틀린 경우를 메시지로 구분하지 않는다(계정 존재 여부 노출 방지).
+        raise HTTPException(status_code=401, detail="아이디 또는 비밀번호가 올바르지 않습니다")
+
+    request.session.clear()  # 세션 고정(session fixation) 방지 — 로그인 성공 시 세션을 새로 시작
+    request.session["user"] = {
+        "username": account["username"],
+        "role": account["role"],
+        "display_name": account.get("display_name") or account["username"],
+    }
+    return {"username": account["username"], "role": account["role"], "display_name": account.get("display_name") or account["username"]}
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request):
+    request.session.clear()
+    return {"ok": True}
+
+
+@app.get("/api/auth/me")
+def auth_me(user: dict[str, str] = Depends(require_login)):
+    return user
+
+
+@app.get("/login")
+def login_page(request: Request):
+    if current_user(request):
+        return RedirectResponse("/")
+    return FileResponse(STATIC_DIR / "login.html")
+
+
+@app.get("/admin")
+def admin_page(request: Request):
+    user = current_user(request)
+    if not user:
+        return RedirectResponse("/login")
+    if user.get("role") != ROLE_ADMIN:
+        return JSONResponse({"detail": "관리자만 접근할 수 있습니다"}, status_code=403)
+    return FileResponse(STATIC_DIR / "admin.html")
+
+
+@app.post("/api/admin/accounts")
+def create_account(payload: AccountCreate, _: dict = Depends(require_admin)):
+    err = validate_username(payload.username)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    if payload.role not in (ROLE_ADMIN, ROLE_STAFF):
+        raise HTTPException(status_code=400, detail=f"role은 {ROLE_ADMIN} 또는 {ROLE_STAFF}만 가능합니다")
+    err = validate_password_strength(payload.password)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        return store.create_account(
+            username=payload.username,
+            password_hash=hash_password(payload.password),
+            role=payload.role,
+            display_name=payload.display_name or "",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.get("/api/admin/accounts")
+def list_accounts(_: dict = Depends(require_admin)):
+    return store.list_accounts()
+
+
+# ---------------------------------------------------------------------- #
 
 
 class ClaimCreate(BaseModel):
@@ -125,7 +250,9 @@ class ClaimUpdate(BaseModel):
 
 
 @app.get("/")
-def root():
+def root(request: Request):
+    if not current_user(request):
+        return RedirectResponse("/login")
     return FileResponse(STATIC_DIR / "index.html")
 
 
@@ -136,7 +263,7 @@ def submit_page():
 
 
 @app.post("/api/claims")
-def create_claim(payload: ClaimCreate):
+def create_claim(payload: ClaimCreate, _: dict = Depends(require_login)):
     """내부 직원용 접수 (전화 응대 내용을 대신 입력하는 등)."""
     row = store.create_claim(payload.model_dump())
     return row
@@ -169,7 +296,7 @@ def create_claim_from_sms(payload: SmsInbound):
 
 
 @app.post("/api/claims/import")
-async def import_claims(file: UploadFile = File(...)):
+async def import_claims(file: UploadFile = File(...), _: dict = Depends(require_login)):
     """기업이 기존에 엑셀/CSV로 갖고 있던 클레임 이력을 일괄 등록한다.
 
     파일 자체가 문제(형식/용량/인코딩/손상)면 400으로 즉시 실패한다.
@@ -216,12 +343,13 @@ def list_claims(
     channel: Optional[str] = None,
     contact: Optional[str] = None,
     q: Optional[str] = None,
+    _: dict = Depends(require_login),
 ):
     return store.list_claims(status=status, assignee=assignee, channel=channel, contact=contact, q=q)
 
 
 @app.get("/api/claims/{claim_id}")
-def get_claim(claim_id: str):
+def get_claim(claim_id: str, _: dict = Depends(require_login)):
     try:
         return store.get_claim(claim_id)
     except ClaimNotFound:
@@ -229,7 +357,7 @@ def get_claim(claim_id: str):
 
 
 @app.patch("/api/claims/{claim_id}")
-def update_claim(claim_id: str, payload: ClaimUpdate):
+def update_claim(claim_id: str, payload: ClaimUpdate, _: dict = Depends(require_login)):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
     try:
         return store.update_claim(claim_id, updates)
@@ -240,5 +368,5 @@ def update_claim(claim_id: str, payload: ClaimUpdate):
 
 
 @app.get("/api/stats/summary")
-def stats_summary():
+def stats_summary(_: dict = Depends(require_login)):
     return store.stats_summary()

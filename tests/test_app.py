@@ -8,19 +8,26 @@ from fastapi.testclient import TestClient
 def client(tmp_path, monkeypatch):
     """app.py 모듈을 불러온 뒤 전역 store/logger를 tmp_path로 갈아끼운다.
 
-    실제 개발용 데이터(src/data, src/logs)를 건드리지 않기 위함이다.
+    실제 개발용 데이터(src/data, src/logs)를 건드리지 않기 위함이다. 로그인이
+    필요한 엔드포인트가 대부분이라, 테스트 계정으로 미리 로그인해서 반환한다
+    (세션 쿠키는 TestClient 인스턴스에 그대로 유지된다).
     """
     import app as app_module
+    from auth import hash_password
     from claim_logger import ClaimLogger
     from claims_store import ClaimsStore
 
     importlib.reload(app_module)  # 이전 테스트의 monkeypatch 잔재 제거
     test_logger = ClaimLogger(base_dir=tmp_path / "logs")
     test_store = ClaimsStore(base_dir=tmp_path / "data", logger=test_logger)
+    test_store.create_account("tester", hash_password("Tester1234!!"), "admin", "테스터")
     monkeypatch.setattr(app_module, "logger", test_logger)
     monkeypatch.setattr(app_module, "store", test_store)
 
-    return TestClient(app_module.app)
+    test_client = TestClient(app_module.app)
+    login_res = test_client.post("/api/auth/login", json={"username": "tester", "password": "Tester1234!!"})
+    assert login_res.status_code == 200
+    return test_client
 
 
 def test_create_and_list_claim(client):
