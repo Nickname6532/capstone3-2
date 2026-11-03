@@ -31,6 +31,34 @@ async function loadUser() {
   });
 }
 
+async function loadLicenseAlerts() {
+  const el = document.getElementById("license-alert");
+  const body = document.getElementById("license-alert-body");
+  const res = await apiFetch("/api/licenses/expiring");
+  const licenses = await res.json();
+
+  if (!licenses.length) {
+    el.classList.remove("alert-board");
+    body.innerHTML = `<p class="alert-empty">만료 임박하거나 만료된 라이선스가 없습니다.</p>`;
+    return;
+  }
+
+  el.classList.add("alert-board");
+  body.innerHTML = licenses.map(lic => {
+    const when = lic.status === "만료"
+      ? `${Math.abs(lic.days_left)}일 전 만료됨`
+      : `${lic.days_left}일 후 만료`;
+    return `
+      <div class="alert-row">
+        <span class="who">${escapeHtml(lic.customer_name)} · ${escapeHtml(lic.product_name)}
+          <span class="status-word lic-${lic.status}">${lic.status}</span>
+        </span>
+        <span class="when num">${escapeHtml(lic.end_date)} (${when})</span>
+      </div>
+    `;
+  }).join("");
+}
+
 async function loadStats() {
   const res = await apiFetch("/api/stats/summary");
   const s = await res.json();
@@ -200,5 +228,6 @@ function debounce(fn, ms) {
 }
 
 loadUser();
+loadLicenseAlerts();
 loadStats();
 loadClaims();

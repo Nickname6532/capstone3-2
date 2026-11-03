@@ -16,6 +16,14 @@
 </header>
 
 <main>
+  <section class="panel alert-board" id="license-alert">
+    <div class="panel-head">
+      <h2>라이선스 만료 임박</h2>
+      <p class="hint"><a href="/licenses">라이선스 관리 →</a></p>
+    </div>
+    <div id="license-alert-body"><p class="alert-empty">불러오는 중...</p></div>
+  </section>
+
   <section class="board" id="stats"></section>
 
   <section class="panel">
@@ -29,14 +37,16 @@
         <label>연락처 <input name="contact" id="internal-contact-input" placeholder="010-0000-0000" inputmode="numeric" /></label>
       </div>
       <div class="row">
-        <label>제품/모델 <input name="product" required /></label>
+        <label>서비스/플랜 <input name="product" required placeholder="예: Pro 플랜, Storage API" /></label>
         <label>원인 유형
           <select name="category">
             <option value="">미분류</option>
-            <option>부품불량</option>
-            <option>배송지연</option>
-            <option>설치오류</option>
-            <option>사용자오조작</option>
+            <option>로그인/인증 오류</option>
+            <option>결제/청구 오류</option>
+            <option>서비스 장애(다운타임)</option>
+            <option>속도저하/성능</option>
+            <option>데이터 동기화 오류</option>
+            <option>API 오류</option>
             <option>기타</option>
           </select>
         </label>
@@ -44,7 +54,7 @@
         <label>담당자 <input name="assignee" placeholder="선택" /></label>
       </div>
       <label>클레임 내용
-        <textarea name="description" rows="3" required placeholder="통화 요약, STT 결과 등을 입력"></textarea>
+        <textarea name="description" rows="3" required placeholder="예: 어제 저녁부터 로그인이 안 된다는 문의, API 응답이 500으로 떨어짐"></textarea>
       </label>
       <button type="submit" class="primary">접수 등록</button>
     </form>
@@ -106,6 +116,6 @@
 </main>
 
 <script src="/static/phone-format.js?v=2"></script>
-<script src="/static/app.js?v=5"></script>
+<script src="/static/app.js?v=6"></script>
 </body>
 </html>

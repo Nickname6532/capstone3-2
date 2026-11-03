@@ -63,6 +63,39 @@ cd src
   ```
   로 생성한 값을 Vercel 프로젝트 환경변수 `SESSION_SECRET`에 넣는다.
 
+## 라이선스·구독 관리 + 만료 알림
+
+`/licenses`에서 고객사 → 제품 → 라이선스 3단 구조로 등록한다. 라이선스 상태(구독중/만료임박/만료)는
+저장하지 않고 만료일 기준으로 조회할 때마다 계산한다(기본 30일 이내면 "만료임박"). 만료임박·만료
+라이선스는 현황판(`/`) 맨 위에 경고 박스로 뜬다.
+
+**이메일 알림**: `GET /api/licenses/check-expiry`를 호출하면 그 시점의 만료임박/만료 라이선스 중
+오늘 아직 알림을 안 보낸 건에 대해 라이선스 등록 시 넣은 `notify_emails`(쉼표로 여러 명, 담당자든
+고객이든 상관없음)로 메일을 보낸다. 같은 날 중복 발송은 하지 않는다.
+
+```bash
+# SMTP 환경변수
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASSWORD=앱비밀번호
+SMTP_FROM=you@gmail.com
+```
+
+`SMTP_HOST`를 설정하지 않으면 실제로 보내지 않고 콘솔에 `[메일 발송 생략: SMTP_HOST 미설정] ...`로만
+남긴다 — 메일 서버 없이도 로직이 맞게 도는지 확인할 수 있다.
+
+**자동 점검**: Vercel에 배포하면 `vercel.json`의 cron 설정으로 매일 새벽 1시(UTC)에 자동 호출된다.
+Vercel이 cron 요청에 자동으로 `Authorization: Bearer $CRON_SECRET`을 붙여주므로, Vercel 환경변수에
+`CRON_SECRET`(아무 임의의 긴 문자열)을 등록해두면 된다. 로컬/상시 서버에서는 system cron이나
+`curl`을 주기적으로 걸어서 같은 효과를 낸다:
+
+```bash
+curl http://localhost:8000/api/licenses/check-expiry -H "Authorization: Bearer $CRON_SECRET"
+```
+
+로그인한 사용자는 `CRON_SECRET` 없이도 같은 엔드포인트를 호출해 수동으로 점검할 수 있다.
+
 ## 접수 채널
 
 | 채널 | 경로 |

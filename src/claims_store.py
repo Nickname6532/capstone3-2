@@ -14,7 +14,7 @@ import csv
 import sqlite3
 import threading
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Optional
 
@@ -23,6 +23,11 @@ from claim_logger import ClaimLogger
 STATUS_RECEIVED = "접수"
 STATUS_IN_PROGRESS = "처리중"
 STATUS_DONE = "완료"
+
+LICENSE_SUBSCRIBED = "구독중"
+LICENSE_EXPIRING = "만료임박"
+LICENSE_EXPIRED = "만료"
+LICENSE_WARNING_DAYS = 30  # 만료 이 날짜 수 이내면 "만료임박"으로 분류
 
 VALID_STATUSES = {STATUS_RECEIVED, STATUS_IN_PROGRESS, STATUS_DONE}
 VALID_TRANSITIONS = {
@@ -92,6 +97,33 @@ CREATE TABLE IF NOT EXISTS accounts (
     failed_attempts INTEGER NOT NULL DEFAULT 0,
     locked_until TEXT NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS customers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    contact TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS products (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    customer_id INTEGER NOT NULL REFERENCES customers(id),
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_products_customer ON products(customer_id);
+
+CREATE TABLE IF NOT EXISTS licenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    product_id INTEGER NOT NULL REFERENCES products(id),
+    plan_name TEXT NOT NULL DEFAULT '',
+    start_date TEXT NOT NULL,
+    end_date TEXT NOT NULL,
+    notify_emails TEXT NOT NULL DEFAULT '',
+    last_notified_at TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_licenses_product ON licenses(product_id);
 """
 
 
@@ -486,3 +518,119 @@ class ClaimsStore:
     @staticmethod
     def _account_public(account: dict[str, Any]) -> dict[str, Any]:
         return {k: v for k, v in account.items() if k != "password_hash"}
+
+    # ------------------------------------------------------------------ #
+    # 고객사 / 제품 / 라이선스
+    #
+    # 고객사-제품-라이선스 3단 구조. 라이선스 상태(구독중/만료임박/만료)는 저장하지
+    # 않고 end_date를 기준으로 조회 시점에 계산한다 — 상태값을 따로 저장하면
+    # "오늘 날짜가 지나서 만료됐는데 DB 값은 구독중"처럼 어긋나는 사고가 난다.
+    def create_customer(self, name: str, contact: str = "") -> dict[str, Any]:
+        with self._lock:
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cur = self._conn.execute(
+                "INSERT INTO customers (name, contact, created_at) VALUES (?, ?, ?)", (name, contact, now)
+            )
+            self._conn.commit()
+            return self.get_customer(cur.lastrowid)
+
+    def get_customer(self, customer_id: int) -> Optional[dict[str, Any]]:
+        row = self._conn.execute("SELECT * FROM customers WHERE id=?", (customer_id,)).fetchone()
+        return dict(row) if row else None
+
+    def list_customers(self) -> list[dict[str, Any]]:
+        rows = self._conn.execute("SELECT * FROM customers ORDER BY name").fetchall()
+        return [dict(r) for r in rows]
+
+    def create_product(self, customer_id: int, name: str) -> dict[str, Any]:
+        with self._lock:
+            if not self.get_customer(customer_id):
+                raise ValueError("존재하지 않는 고객사입니다")
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cur = self._conn.execute(
+                "INSERT INTO products (customer_id, name, created_at) VALUES (?, ?, ?)",
+                (customer_id, name, now),
+            )
+            self._conn.commit()
+            row = self._conn.execute("SELECT * FROM products WHERE id=?", (cur.lastrowid,)).fetchone()
+            return dict(row)
+
+    def list_products(self, customer_id: Optional[int] = None) -> list[dict[str, Any]]:
+        if customer_id:
+            rows = self._conn.execute(
+                "SELECT * FROM products WHERE customer_id=? ORDER BY name", (customer_id,)
+            ).fetchall()
+        else:
+            rows = self._conn.execute("SELECT * FROM products ORDER BY name").fetchall()
+        return [dict(r) for r in rows]
+
+    def create_license(
+        self, product_id: int, plan_name: str, start_date: str, end_date: str, notify_emails: str = ""
+    ) -> dict[str, Any]:
+        with self._lock:
+            if not self._conn.execute("SELECT 1 FROM products WHERE id=?", (product_id,)).fetchone():
+                raise ValueError("존재하지 않는 제품입니다")
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cur = self._conn.execute(
+                """INSERT INTO licenses (product_id, plan_name, start_date, end_date, notify_emails, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (product_id, plan_name, start_date, end_date, notify_emails, now),
+            )
+            self._conn.commit()
+            return self._get_license_joined(cur.lastrowid)
+
+    _LICENSE_JOIN_SQL = """
+        SELECT l.*, p.name AS product_name, p.customer_id AS customer_id, c.name AS customer_name
+        FROM licenses l
+        JOIN products p ON p.id = l.product_id
+        JOIN customers c ON c.id = p.customer_id
+    """
+
+    def _get_license_joined(self, license_id: int) -> Optional[dict[str, Any]]:
+        row = self._conn.execute(self._LICENSE_JOIN_SQL + " WHERE l.id=?", (license_id,)).fetchone()
+        return self._with_license_status(dict(row)) if row else None
+
+    def list_licenses(self, customer_id: Optional[int] = None) -> list[dict[str, Any]]:
+        sql = self._LICENSE_JOIN_SQL
+        params: list[Any] = []
+        if customer_id:
+            sql += " WHERE p.customer_id=?"
+            params.append(customer_id)
+        sql += " ORDER BY l.end_date"
+        rows = self._conn.execute(sql, params).fetchall()
+        return [self._with_license_status(dict(r)) for r in rows]
+
+    def list_expiring_licenses(self, days: int = LICENSE_WARNING_DAYS) -> list[dict[str, Any]]:
+        """만료임박/만료 상태인 라이선스만, 급한 순(만료일 빠른 순)으로."""
+        licenses = [
+            lic for lic in self.list_licenses() if lic["status"] in (LICENSE_EXPIRING, LICENSE_EXPIRED)
+        ]
+        licenses.sort(key=lambda lic: lic["end_date"])
+        return licenses
+
+    def mark_license_notified(self, license_id: int) -> None:
+        with self._lock:
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._conn.execute("UPDATE licenses SET last_notified_at=? WHERE id=?", (now, license_id))
+            self._conn.commit()
+
+    @staticmethod
+    def _with_license_status(row: dict[str, Any]) -> dict[str, Any]:
+        try:
+            end = date.fromisoformat(str(row["end_date"])[:10])
+            days_left = (end - date.today()).days
+        except (ValueError, TypeError):
+            days_left = None
+
+        if days_left is None:
+            status = "알수없음"
+        elif days_left < 0:
+            status = LICENSE_EXPIRED
+        elif days_left <= LICENSE_WARNING_DAYS:
+            status = LICENSE_EXPIRING
+        else:
+            status = LICENSE_SUBSCRIBED
+
+        row["status"] = status
+        row["days_left"] = days_left
+        return row

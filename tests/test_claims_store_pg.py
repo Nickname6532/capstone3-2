@@ -31,8 +31,31 @@ def store():
     s = PgClaimsStore(database_url=TEST_DATABASE_URL)
     s._execute("TRUNCATE TABLE claims")
     s._execute("TRUNCATE TABLE accounts")
+    s._execute("TRUNCATE TABLE licenses, products, customers RESTART IDENTITY CASCADE")
     s._conn.commit()
     return s
+
+
+def test_license_lifecycle(store):
+    from datetime import date, timedelta
+
+    customer = store.create_customer("가나전자", "02-000-0000")
+    product = store.create_product(customer["id"], "냉장고 K100")
+    lic = store.create_license(
+        product["id"], "Standard",
+        (date.today() - timedelta(days=10)).isoformat(),
+        (date.today() + timedelta(days=5)).isoformat(),
+        "ops@company.com",
+    )
+    assert lic["customer_name"] == "가나전자"
+    assert lic["status"] == "만료임박"
+
+    expiring = store.list_expiring_licenses()
+    assert len(expiring) == 1
+
+    store.mark_license_notified(lic["id"])
+    refreshed = store.list_licenses()[0]
+    assert refreshed["last_notified_at"] != ""
 
 
 def test_create_and_get_account(store):

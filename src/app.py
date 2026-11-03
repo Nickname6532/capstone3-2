@@ -28,6 +28,7 @@ from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 import bulk_import
+import email_notify
 from auth import (
     ROLE_ADMIN,
     ROLE_STAFF,
@@ -45,6 +46,10 @@ BASE_DIR = Path(__file__).resolve().parent
 IS_VERCEL = bool(os.environ.get("VERCEL"))
 
 store, logger = build_store()
+
+# Vercel Cron(GET 요청으로 트리거)이 /api/licenses/check-expiry를 호출할 때 쓰는 공유 비밀값.
+# Vercel이 cron job에는 자동으로 "Authorization: Bearer <CRON_SECRET>"을 붙여서 호출해준다.
+CRON_SECRET = os.environ.get("CRON_SECRET")
 
 STATIC_DIR = BASE_DIR / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
@@ -80,7 +85,7 @@ async def no_cache_static(request, call_next):
     캐시해서 수정사항이 반영 안 된 것처럼 보이는 문제가 실제로 있었다.
     """
     response = await call_next(request)
-    no_cache_paths = {"/", "/submit", "/login", "/admin"}
+    no_cache_paths = {"/", "/submit", "/login", "/admin", "/licenses"}
     if request.url.path in no_cache_paths or request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
@@ -202,6 +207,97 @@ def create_account(payload: AccountCreate, _: dict = Depends(require_admin)):
 @app.get("/api/admin/accounts")
 def list_accounts(_: dict = Depends(require_admin)):
     return store.list_accounts()
+
+
+# ---------------------------------------------------------------------- #
+# 고객사 / 제품 / 라이선스
+#
+# 클레임과 달리 보안 민감도가 낮은 운영 데이터라 admin 제한 없이 로그인한
+# 누구나(담당자 포함) 관리할 수 있게 열어둔다.
+
+
+class CustomerCreate(BaseModel):
+    name: str
+    contact: Optional[str] = ""
+
+
+class ProductCreate(BaseModel):
+    customer_id: int
+    name: str
+
+
+class LicenseCreate(BaseModel):
+    product_id: int
+    plan_name: Optional[str] = ""
+    start_date: str
+    end_date: str
+    notify_emails: Optional[str] = ""  # 쉼표로 여러 명
+
+
+@app.post("/api/customers")
+def create_customer(payload: CustomerCreate, _: dict = Depends(require_login)):
+    return store.create_customer(payload.name, payload.contact or "")
+
+
+@app.get("/api/customers")
+def list_customers(_: dict = Depends(require_login)):
+    return store.list_customers()
+
+
+@app.post("/api/products")
+def create_product(payload: ProductCreate, _: dict = Depends(require_login)):
+    try:
+        return store.create_product(payload.customer_id, payload.name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/products")
+def list_products(customer_id: Optional[int] = None, _: dict = Depends(require_login)):
+    return store.list_products(customer_id=customer_id)
+
+
+@app.post("/api/licenses")
+def create_license(payload: LicenseCreate, _: dict = Depends(require_login)):
+    if payload.end_date < payload.start_date:
+        raise HTTPException(status_code=400, detail="만료일은 시작일 이후여야 합니다")
+    try:
+        return store.create_license(
+            payload.product_id, payload.plan_name or "", payload.start_date, payload.end_date, payload.notify_emails or ""
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/licenses")
+def list_licenses(customer_id: Optional[int] = None, _: dict = Depends(require_login)):
+    return store.list_licenses(customer_id=customer_id)
+
+
+@app.get("/api/licenses/expiring")
+def list_expiring_licenses(_: dict = Depends(require_login)):
+    return store.list_expiring_licenses()
+
+
+@app.get("/api/licenses/check-expiry")
+def check_license_expiry(request: Request):
+    """만료임박/만료 라이선스를 점검해 담당자(혹은 고객)에게 메일을 보낸다.
+
+    Vercel Cron(매일 1회, 계정 없이 GET + CRON_SECRET 베어러 토큰으로 호출)이나
+    로그인한 사용자가 대시보드에서 수동으로 눌러도 호출할 수 있다.
+    """
+    auth_header = request.headers.get("authorization", "")
+    is_cron = bool(CRON_SECRET) and auth_header == f"Bearer {CRON_SECRET}"
+    if not is_cron and not current_user(request):
+        raise HTTPException(status_code=401, detail="로그인이 필요합니다")
+    return email_notify.check_and_notify(store)
+
+
+@app.get("/licenses")
+def licenses_page(request: Request):
+    if not current_user(request):
+        return RedirectResponse("/login")
+    return FileResponse(STATIC_DIR / "licenses.html")
 
 
 # ---------------------------------------------------------------------- #

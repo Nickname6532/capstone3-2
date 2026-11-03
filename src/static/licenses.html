@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>라이선스 관리</title>
+<link rel="stylesheet" href="/static/style.css?v=4" />
+</head>
+<body>
+<header>
+  <h1>라이선스·고객 관리</h1>
+  <p class="sub"><a href="/">← 현황판으로</a></p>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="panel-head">
+      <h2>고객사 등록</h2>
+      <p class="hint">제품·라이선스를 연결하려면 먼저 고객사가 있어야 합니다</p>
+    </div>
+    <form id="customer-form">
+      <div class="row">
+        <label>고객사명 <input name="name" required /></label>
+        <label>연락처 <input name="contact" placeholder="담당자 연락처(선택)" /></label>
+      </div>
+      <button type="submit" class="primary">고객사 추가</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>제품 등록</h2>
+    </div>
+    <form id="product-form">
+      <div class="row">
+        <label>고객사
+          <select name="customer_id" id="product-customer-select" required></select>
+        </label>
+        <label>제품명 <input name="name" required /></label>
+      </div>
+      <button type="submit" class="primary">제품 추가</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>라이선스 등록</h2>
+      <p class="hint">알림 받을 이메일은 쉼표로 여러 개 입력 가능 (담당자/고객 모두 가능)</p>
+    </div>
+    <form id="license-form">
+      <div class="row">
+        <label>고객사
+          <select id="license-customer-select" required></select>
+        </label>
+        <label>제품
+          <select name="product_id" id="license-product-select" required></select>
+        </label>
+        <label>플랜명 <input name="plan_name" placeholder="예: Standard" /></label>
+      </div>
+      <div class="row">
+        <label>시작일 <input name="start_date" type="date" required /></label>
+        <label>만료일 <input name="end_date" type="date" required /></label>
+        <label>알림 이메일 <input name="notify_emails" placeholder="staff@company.com, customer@client.com" /></label>
+      </div>
+      <button type="submit" class="primary">라이선스 등록</button>
+    </form>
+    <p id="license-form-result" style="font-size: 13px; margin-top: 10px;"></p>
+  </section>
+
+  <section class="panel">
+    <h2>라이선스 목록</h2>
+    <div class="table-scroll">
+      <table>
+        <thead>
+          <tr><th>고객사</th><th>제품</th><th>플랜</th><th>시작일</th><th>만료일</th><th>상태</th><th>알림 대상</th></tr>
+        </thead>
+        <tbody id="licenses-body"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  }
+
+  async function apiFetch(url, options) {
+    const res = await fetch(url, options);
+    if (res.status === 401) { location.href = "/login"; throw new Error("로그인이 필요합니다"); }
+    return res;
+  }
+
+  let customers = [];
+  let products = [];
+
+  function fillCustomerSelects() {
+    const opts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
+    document.getElementById("product-customer-select").innerHTML = opts || "<option value=''>고객사를 먼저 등록하세요</option>";
+    document.getElementById("license-customer-select").innerHTML = opts || "<option value=''>고객사를 먼저 등록하세요</option>";
+  }
+
+  function fillProductSelect(customerId) {
+    const filtered = customerId ? products.filter(p => String(p.customer_id) === String(customerId)) : products;
+    const sel = document.getElementById("license-product-select");
+    sel.innerHTML = filtered.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("")
+      || "<option value=''>이 고객사의 제품이 없습니다</option>";
+  }
+
+  async function loadCustomers() {
+    const res = await apiFetch("/api/customers");
+    customers = await res.json();
+    fillCustomerSelects();
+  }
+
+  async function loadProducts() {
+    const res = await apiFetch("/api/products");
+    products = await res.json();
+    fillProductSelect(document.getElementById("license-customer-select").value);
+  }
+
+  async function loadLicenses() {
+    const res = await apiFetch("/api/licenses");
+    const licenses = await res.json();
+    document.getElementById("licenses-body").innerHTML = licenses.map(lic => `
+      <tr>
+        <td>${escapeHtml(lic.customer_name)}</td>
+        <td>${escapeHtml(lic.product_name)}</td>
+        <td>${escapeHtml(lic.plan_name || "-")}</td>
+        <td class="num">${escapeHtml(lic.start_date)}</td>
+        <td class="num">${escapeHtml(lic.end_date)}</td>
+        <td><span class="status-word lic-${lic.status}">${lic.status}</span></td>
+        <td>${escapeHtml(lic.notify_emails || "-")}</td>
+      </tr>
+    `).join("");
+  }
+
+  document.getElementById("customer-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    await apiFetch("/api/customers", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(Object.fromEntries(fd.entries())),
+    });
+    e.target.reset();
+    await loadCustomers();
+  });
+
+  document.getElementById("product-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = Object.fromEntries(fd.entries());
+    payload.customer_id = Number(payload.customer_id);
+    const res = await apiFetch("/api/products", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) { e.target.reset(); await loadProducts(); }
+  });
+
+  document.getElementById("license-customer-select").addEventListener("change", (e) => {
+    fillProductSelect(e.target.value);
+  });
+
+  document.getElementById("license-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const payload = Object.fromEntries(fd.entries());
+    payload.product_id = Number(document.getElementById("license-product-select").value);
+    const resultEl = document.getElementById("license-form-result");
+    resultEl.textContent = "";
+
+    const res = await apiFetch("/api/licenses", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      resultEl.textContent = err.detail || "등록 실패";
+      resultEl.style.color = "var(--coral)";
+      return;
+    }
+    resultEl.textContent = "라이선스가 등록되었습니다.";
+    resultEl.style.color = "var(--moss)";
+    e.target.reset();
+    await loadLicenses();
+  });
+
+  (async () => {
+    await loadCustomers();
+    await loadProducts();
+    await loadLicenses();
+  })();
+</script>
+</body>
+</html>

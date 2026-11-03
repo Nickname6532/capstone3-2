@@ -8,5 +8,8 @@
   ],
   "routes": [
     { "src": "/(.*)", "dest": "api/index.py" }
+  ],
+  "crons": [
+    { "path": "/api/licenses/check-expiry", "schedule": "0 1 * * *" }
   ]
 }
