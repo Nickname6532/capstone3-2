@@ -20,7 +20,8 @@
     </div>
     <form id="customer-form">
       <div class="row">
-        <label>고객사명 <input name="name" required /></label>
+        <label>고객사명(사이트명) <input name="name" required /></label>
+        <label>구분 <input name="category" placeholder="예: 코스피, 대학" /></label>
         <label>연락처 <input name="contact" placeholder="담당자 연락처(선택)" /></label>
         <label>이메일 <input name="email" type="email" placeholder="담당자 이메일(선택)" /></label>
         <label>메모 <input name="memo" placeholder="VIP, 특이사항 등(선택)" /></label>
@@ -29,7 +30,7 @@
     </form>
     <div class="table-scroll" style="margin-top:14px;">
       <table>
-        <thead><tr><th>고객사</th><th>연락처</th><th>이메일</th><th>메모</th><th>액션</th></tr></thead>
+        <thead><tr><th>고객사</th><th>구분</th><th>연락처</th><th>이메일</th><th>메모</th><th>액션</th></tr></thead>
         <tbody id="customers-body"></tbody>
       </table>
     </div>
@@ -119,11 +120,24 @@
   </section>
 
   <section class="panel">
+    <div class="panel-head">
+      <h2>사이트별 요약</h2>
+      <p class="hint"><a href="/api/licenses/export.xlsx">엑셀 내보내기(가져오기와 같은 양식) ↓</a></p>
+    </div>
+    <div class="table-scroll">
+      <table>
+        <thead><tr><th>사이트명</th><th>구분</th><th>라이선스 수</th><th>활성</th><th>만료 임박</th><th>만료</th><th>1년</th><th>3년</th><th>5년</th></tr></thead>
+        <tbody id="site-summary-body"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="panel">
     <h2>라이선스 목록</h2>
     <div class="table-scroll">
       <table>
         <thead>
-          <tr><th>고객사</th><th>제품</th><th>플랜</th><th>라이선스 키</th><th>시작일</th><th>만료일</th><th>기준(D-)</th><th>상태</th><th>알림 대상</th><th>액션</th></tr>
+          <tr><th>사이트명</th><th>구분</th><th>제품</th><th>구독기간</th><th>라이선스 키</th><th>시작일</th><th>만료일</th><th>남은 일수</th><th>기준(D-)</th><th>상태</th><th>알림 대상</th><th>액션</th></tr>
         </thead>
         <tbody id="licenses-body"></tbody>
       </table>
@@ -172,6 +186,7 @@
     document.getElementById("customers-body").innerHTML = customers.map(c => `
       <tr data-id="${c.id}">
         <td>${escapeHtml(c.name)}</td>
+        <td>${escapeHtml(c.category || "-")}</td>
         <td>${escapeHtml(c.contact || "-")}</td>
         <td>${escapeHtml(c.email || "-")}</td>
         <td>${escapeHtml(c.memo || "-")}</td>
@@ -189,11 +204,12 @@
       tr.querySelector(".overview-btn").addEventListener("click", () => openOverview(id));
       tr.querySelector(".edit-btn").addEventListener("click", async () => {
         const name = prompt("고객사명", c.name); if (name === null) return;
+        const category = prompt("구분(예: 코스피, 대학)", c.category || "") ?? "";
         const email = prompt("이메일", c.email || "") ?? "";
         const memo = prompt("메모", c.memo || "") ?? "";
         await apiFetch(`/api/customers/${id}`, {
           method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, email, memo }),
+          body: JSON.stringify({ name, category, email, memo }),
         });
         await loadCustomers();
       });
@@ -292,14 +308,17 @@
   async function loadLicenses() {
     const res = await apiFetch("/api/licenses");
     const licenses = await res.json();
+    loadSiteSummary();
     document.getElementById("licenses-body").innerHTML = licenses.map(lic => `
       <tr data-id="${lic.id}">
         <td>${escapeHtml(lic.customer_name)}</td>
+        <td>${escapeHtml((customers.find(c => c.id === lic.customer_id) || {}).category || "-")}</td>
         <td>${escapeHtml(lic.product_name)}</td>
         <td>${escapeHtml(lic.plan_name || "-")}</td>
         <td class="num">${escapeHtml(lic.license_key || "-")}</td>
         <td class="num">${escapeHtml(lic.start_date)}</td>
         <td class="num">${escapeHtml(lic.end_date)}</td>
+        <td class="num">${lic.days_left}</td>
         <td class="num">${lic.warning_days}</td>
         <td><span class="status-word lic-${lic.status}">${lic.status}</span></td>
         <td>${NOTIFY_TARGET_LABELS[lic.notify_target_option] || lic.notify_target_option}</td>
@@ -328,6 +347,19 @@
         await loadLicenses();
       });
     });
+  }
+
+  async function loadSiteSummary() {
+    const rows = await apiFetch("/api/licenses/site-summary").then(r => r.json());
+    document.getElementById("site-summary-body").innerHTML = rows.length
+      ? rows.map(s => `
+          <tr>
+            <td>${escapeHtml(s.site)}</td><td>${escapeHtml(s.category || "-")}</td>
+            <td class="num">${s.total}</td><td class="num">${s.active}</td>
+            <td class="num">${s.expiring}</td><td class="num">${s.expired}</td>
+            <td class="num">${s.y1}</td><td class="num">${s.y3}</td><td class="num">${s.y5}</td>
+          </tr>`).join("")
+      : `<tr><td colspan="9" class="hint">등록된 라이선스가 없습니다.</td></tr>`;
   }
 
   document.getElementById("customer-form").addEventListener("submit", async (e) => {
@@ -413,7 +445,7 @@
       let html = data.dry_run
         ? `<p><strong>미리보기</strong> — 등록 예정 ${data.preview_rows.length}건 / 실패 ${data.failed_count}건</p>`
         : `<p><strong>${data.imported_count}건</strong> 등록됨 / 총 ${data.total_rows}건 중 ` +
-          `중복(license_key) ${data.duplicate_count}건 제외, 실패 ${data.failed_count}건</p>`;
+          `라이선스 키 중복 ${data.duplicate_count}건 제외, 실패 ${data.failed_count}건</p>`;
 
       if (data.preview_rows && data.preview_rows.length) {
         html += "<div class='table-scroll'><table><thead><tr><th>고객사</th><th>제품</th><th>플랜</th><th>라이선스 키</th><th>시작일</th><th>만료일</th></tr></thead><tbody>" +
@@ -425,6 +457,11 @@
       if (data.failed_rows && data.failed_rows.length) {
         html += "<p style='font-size:13px; color: var(--coral); margin-bottom:2px;'>실패</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
           data.failed_rows.map(f => `<li>${f.row ? f.row + "행: " : ""}${escapeHtml(f.reason)}</li>`).join("") +
+          "</ul>";
+      }
+      if (data.duplicate_rows && data.duplicate_rows.length) {
+        html += "<p style='font-size:13px; color: var(--warn); margin-bottom:2px;'>중복 라이선스 키 (건너뜀)</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
+          data.duplicate_rows.map(d => `<li>${escapeHtml(d.license_key)} — ${escapeHtml(d.reason)}</li>`).join("") +
           "</ul>";
       }
       resultEl.innerHTML = html;

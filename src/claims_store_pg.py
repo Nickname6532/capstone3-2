@@ -169,10 +169,12 @@ CREATE TABLE IF NOT EXISTS customers (
     contact TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL DEFAULT '',
     memo TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
 ALTER TABLE customers ADD COLUMN IF NOT EXISTS memo TEXT NOT NULL DEFAULT '';
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
@@ -635,12 +637,14 @@ class PgClaimsStore:
 
     # ------------------------------------------------------------------ #
     # 고객사 / 제품 / 라이선스 — SQLite 버전(ClaimsStore)과 동일한 인터페이스
-    def create_customer(self, name: str, contact: str = "", email: str = "", memo: str = "") -> dict[str, Any]:
+    def create_customer(
+        self, name: str, contact: str = "", email: str = "", memo: str = "", category: str = ""
+    ) -> dict[str, Any]:
         with self._lock:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cur = self._execute(
-                "INSERT INTO customers (name, contact, email, memo, created_at) VALUES (%s, %s, %s, %s, %s) RETURNING id",
-                (name, contact, email, memo, now),
+                "INSERT INTO customers (name, contact, email, memo, category, created_at) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
+                (name, contact, email, memo, category, now),
             )
             new_id = cur.fetchone()["id"]
             self._conn.commit()
@@ -659,7 +663,7 @@ class PgClaimsStore:
         with self._lock:
             if not self.get_customer(customer_id):
                 raise ValueError("존재하지 않는 고객사입니다")
-            fields = {k: updates[k] for k in ("name", "contact", "email", "memo") if k in updates and updates[k] is not None}
+            fields = {k: updates[k] for k in ("name", "contact", "email", "memo", "category") if k in updates and updates[k] is not None}
             if fields:
                 set_clause = ", ".join(f"{k}=%s" for k in fields)
                 self._execute(f"UPDATE customers SET {set_clause} WHERE id=%s", (*fields.values(), customer_id))
@@ -769,10 +773,11 @@ class PgClaimsStore:
             self._conn.commit()
             return self._get_license_joined(new_id)
 
-    def find_license_by_key(self, product_id: int, license_key: str) -> Optional[dict[str, Any]]:
+    def find_license_by_key(self, license_key: str) -> Optional[dict[str, Any]]:
+        """라이선스 키는 고객사·제품과 무관하게 전체에서 유일해야 한다."""
         if not license_key:
             return None
-        cur = self._execute("SELECT * FROM licenses WHERE product_id=%s AND license_key=%s", (product_id, license_key))
+        cur = self._execute(self._LICENSE_JOIN_SQL + " WHERE l.license_key=%s", (license_key,))
         row = cur.fetchone()
         return self._with_license_status(dict(row)) if row else None
 

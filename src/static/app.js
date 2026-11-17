@@ -196,6 +196,16 @@ form.addEventListener("submit", async (e) => {
   await Promise.all([loadClaims(), loadStats(), loadAnalytics()]);
 });
 
+const importKind = document.getElementById("import-kind");
+importKind.addEventListener("change", () => {
+  document.getElementById("import-product-label").hidden = importKind.value !== "licenses";
+});
+
+function importList(title, color, items) {
+  return `<p style='font-size:13px; color: ${color}; margin-bottom:2px;'>${title}</p>` +
+    `<ul style='font-size:13px; color: var(--muted); margin-top:0;'>${items.join("")}</ul>`;
+}
+
 document.getElementById("import-btn").addEventListener("click", async () => {
   const fileInput = document.getElementById("import-file");
   const resultEl = document.getElementById("import-result");
@@ -204,6 +214,7 @@ document.getElementById("import-btn").addEventListener("click", async () => {
     alert("파일을 선택해주세요.");
     return;
   }
+  const isLicense = importKind.value === "licenses";
   const btn = document.getElementById("import-btn");
   btn.disabled = true;
   btn.textContent = "가져오는 중...";
@@ -211,9 +222,14 @@ document.getElementById("import-btn").addEventListener("click", async () => {
 
   const fd = new FormData();
   fd.append("file", file);
+  let url = "/api/claims/import";
+  if (isLicense) {
+    const product = document.getElementById("import-product").value.trim();
+    url = "/api/licenses/import" + (product ? `?default_product_name=${encodeURIComponent(product)}` : "");
+  }
 
   try {
-    const res = await apiFetch("/api/claims/import", { method: "POST", body: fd });
+    const res = await apiFetch(url, { method: "POST", body: fd });
     const data = await res.json();
     if (!res.ok) {
       resultEl.innerHTML = `<p style="color: var(--danger);">가져오기 실패: ${escapeHtml(data.detail || res.status)}</p>`;
@@ -222,23 +238,20 @@ document.getElementById("import-btn").addEventListener("click", async () => {
     let html = `<p><strong>${data.imported_count}건</strong> 등록됨 / 총 ${data.total_rows}건 중 ` +
       `중복 ${data.duplicate_count}건 제외, 실패 ${data.failed_count}건</p>`;
     if (data.failed_rows && data.failed_rows.length) {
-      html += "<p style='font-size:13px; color: var(--danger); margin-bottom:2px;'>실패</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
-        data.failed_rows.map(f => `<li>${f.row ? f.row + "행: " : ""}${escapeHtml(f.reason)}</li>`).join("") +
-        "</ul>";
+      html += importList("실패", "var(--danger)",
+        data.failed_rows.map(f => `<li>${f.row ? f.row + "행: " : ""}${escapeHtml(f.reason)}</li>`));
     }
     if (data.duplicate_rows && data.duplicate_rows.length) {
-      html += "<p style='font-size:13px; color: var(--warn); margin-bottom:2px;'>중복 (건너뜀)</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
-        data.duplicate_rows.map(d => `<li>${d.row ? d.row + "행: " : ""}${escapeHtml(d.reason)}</li>`).join("") +
-        "</ul>";
+      html += importList("중복 (건너뜀)", "var(--warn)",
+        data.duplicate_rows.map(d => `<li>${d.row ? d.row + "행: " : ""}${d.license_key ? escapeHtml(d.license_key) + " — " : ""}${escapeHtml(d.reason)}</li>`));
     }
     if (data.warnings && data.warnings.length) {
-      html += "<p style='font-size:13px; color: var(--muted); margin-bottom:2px;'>주의(자동 보정됨)</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
-        data.warnings.map(w => `<li>${w.claim_id}: ${w.warnings.map(escapeHtml).join(", ")}</li>`).join("") +
-        "</ul>";
+      html += importList("주의(자동 보정됨)", "var(--muted)",
+        data.warnings.map(w => `<li>${escapeHtml(String(w.claim_id || w.license_id))}: ${w.warnings.map(escapeHtml).join(", ")}</li>`));
     }
     resultEl.innerHTML = html;
     fileInput.value = "";
-    await Promise.all([loadClaims(), loadStats(), loadAnalytics()]);
+    await Promise.all([loadClaims(), loadStats(), loadAnalytics(), loadLicenseAlerts(), loadFieldSuggestions()]);
   } catch (err) {
     resultEl.innerHTML = `<p style="color: var(--danger);">네트워크 오류로 가져오기에 실패했습니다.</p>`;
   } finally {

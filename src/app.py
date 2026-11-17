@@ -20,7 +20,7 @@ import secrets
 import sqlite3
 import sys
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -332,6 +332,7 @@ class CustomerCreate(BaseModel):
     contact: Optional[str] = ""
     email: Optional[str] = ""
     memo: Optional[str] = ""
+    category: Optional[str] = ""  # 구분(예: 코스피, 대학)
 
 
 class CustomerUpdate(BaseModel):
@@ -339,6 +340,7 @@ class CustomerUpdate(BaseModel):
     contact: Optional[str] = None
     email: Optional[str] = None
     memo: Optional[str] = None
+    category: Optional[str] = None
 
 
 class ProductCreate(BaseModel):
@@ -377,7 +379,9 @@ class LicenseUpdate(BaseModel):
 
 @app.post("/api/customers")
 def create_customer(payload: CustomerCreate, _: dict = Depends(require_login)):
-    return store.create_customer(payload.name, payload.contact or "", payload.email or "", payload.memo or "")
+    return store.create_customer(
+        payload.name, payload.contact or "", payload.email or "", payload.memo or "", payload.category or ""
+    )
 
 
 @app.get("/api/customers")
@@ -506,9 +510,10 @@ async def import_licenses(
         raise HTTPException(status_code=400, detail=str(e))
 
     imported_count = 0
-    duplicate_count = 0
+    duplicate_rows: list[dict[str, Any]] = []
     warning_rows: list[dict[str, Any]] = []
     preview_rows: list[dict[str, Any]] = []
+    seen_keys: set[str] = set()
 
     for mapped in ok_rows:
         warnings = mapped.pop("_warnings", None) or []
@@ -518,6 +523,21 @@ async def import_licenses(
         start_date = mapped["start_date"]
         end_date = mapped["end_date"]
         license_key = mapped.get("license_key", "")
+
+        # 라이선스 키가 같으면 같은 라이선스로 보고 건너뛴다 — DB에 이미 있는 키뿐 아니라
+        # 같은 파일 안에서 겹치는 키도 (고객사·제품과 무관하게) 한 번만 등록한다.
+        if license_key:
+            if license_key in seen_keys:
+                duplicate_rows.append({"license_key": license_key, "reason": "파일 안에서 라이선스 키가 중복됨"})
+                continue
+            existing = store.find_license_by_key(license_key)
+            if existing:
+                duplicate_rows.append({
+                    "license_key": license_key,
+                    "reason": f"이미 등록된 라이선스 키 ({existing.get('customer_name') or '기존 데이터'})",
+                })
+                continue
+            seen_keys.add(license_key)
 
         if dry_run:
             preview_rows.append({
@@ -529,14 +549,10 @@ async def import_licenses(
 
         customer = next((c for c in store.list_customers() if c["name"] == customer_name), None)
         if not customer:
-            customer = store.create_customer(customer_name, memo=mapped.get("customer_category", ""))
+            customer = store.create_customer(customer_name, category=mapped.get("customer_category", ""))
         product = next((p for p in store.list_products(customer_id=customer["id"]) if p["name"] == product_name), None)
         if not product:
             product = store.create_product(customer["id"], product_name)
-
-        if license_key and store.find_license_by_key(product["id"], license_key):
-            duplicate_count += 1
-            continue
 
         try:
             row = store.create_license(
@@ -555,7 +571,8 @@ async def import_licenses(
         "dry_run": dry_run,
         "total_rows": len(ok_rows) + len(failed_rows),
         "imported_count": imported_count,
-        "duplicate_count": duplicate_count,
+        "duplicate_count": len(duplicate_rows),
+        "duplicate_rows": duplicate_rows[:50],
         "failed_count": len(failed_rows),
         "failed_rows": failed_rows[:50],
         "warnings": warning_rows[:50],
@@ -563,6 +580,79 @@ async def import_licenses(
     if dry_run:
         result["preview_rows"] = preview_rows[:50]
     return result
+
+
+_LICENSE_STATUS_LABELS = {"구독중": "활성", "만료임박": "만료 임박", "만료": "만료"}
+
+
+def _plan_years(lic: dict[str, Any]) -> int:
+    """구독기간(년): 플랜명이 "N년"이면 그 값, 아니면 시작~만료일 간격으로 추정한다."""
+    digits = "".join(ch for ch in (lic.get("plan_name") or "") if ch.isdigit())
+    if digits and (lic.get("plan_name") or "").endswith("년"):
+        return int(digits)
+    try:
+        days = (date.fromisoformat(lic["end_date"][:10]) - date.fromisoformat(lic["start_date"][:10])).days
+        return max(1, round(days / 365))
+    except (ValueError, TypeError):
+        return 0
+
+
+def _license_rows_with_site_info() -> list[dict[str, Any]]:
+    categories = {c["id"]: c.get("category", "") for c in store.list_customers()}
+    rows = []
+    for lic in store.list_licenses():
+        rows.append({**lic, "category": categories.get(lic["customer_id"], ""), "plan_years": _plan_years(lic)})
+    rows.sort(key=lambda r: (r["customer_name"], r["start_date"]))
+    return rows
+
+
+def _build_site_summary(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    summary: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        s = summary.setdefault(r["customer_name"], {
+            "site": r["customer_name"], "category": r["category"], "total": 0,
+            "active": 0, "expiring": 0, "expired": 0, "y1": 0, "y3": 0, "y5": 0,
+        })
+        s["total"] += 1
+        s[{"구독중": "active", "만료임박": "expiring", "만료": "expired"}.get(r["status"], "active")] += 1
+        if r["plan_years"] in (1, 3, 5):
+            s[f"y{r['plan_years']}"] += 1
+    return list(summary.values())
+
+
+@app.get("/api/licenses/site-summary")
+def license_site_summary(_: dict = Depends(require_login)):
+    """사이트(고객사)별 라이선스 수·상태·구독기간 요약 (VMware 라이선스 양식의 '사이트별 요약' 시트)."""
+    return _build_site_summary(_license_rows_with_site_info())
+
+
+@app.get("/api/licenses/export.xlsx")
+def export_licenses_xlsx(_: dict = Depends(require_login)):
+    """가져오기와 같은 양식(라이선스 목록 + 사이트별 요약 두 시트)으로 내보낸다."""
+    from openpyxl import Workbook
+
+    rows = _license_rows_with_site_info()
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "라이선스 목록"
+    ws.append(["No", "라이선스 키", "사이트명", "구분", "구독기간(년)", "시작일", "만료일", "남은 일수", "상태"])
+    for i, r in enumerate(rows, start=1):
+        ws.append([
+            i, r.get("license_key", ""), r["customer_name"], r["category"], r["plan_years"],
+            r["start_date"], r["end_date"], r["days_left"], _LICENSE_STATUS_LABELS.get(r["status"], r["status"]),
+        ])
+    ws2 = wb.create_sheet("사이트별 요약")
+    ws2.append(["사이트명", "구분", "라이선스 수", "활성", "만료 임박", "만료", "1년", "3년", "5년"])
+    for s in _build_site_summary(rows):
+        ws2.append([s["site"], s["category"], s["total"], s["active"], s["expiring"], s["expired"], s["y1"], s["y3"], s["y5"]])
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=license_sites.xlsx"},
+    )
 
 
 @app.get("/api/licenses/expiring")
@@ -869,6 +959,11 @@ async def import_claims(
     인식된 매핑·예상 등록/중복 건수만 미리보기로 돌려준다.
     """
     content = await file.read()
+    if license_import.looks_like_license_file(file.filename, content):
+        raise HTTPException(
+            status_code=400,
+            detail="라이선스 목록 양식으로 보입니다. '가져올 데이터 종류'를 '라이선스(사이트별)'로 선택해 다시 올려주세요.",
+        )
     try:
         ok_rows, file_duplicates, failed_rows = bulk_import.import_rows(file.filename, content)
     except ValueError as e:

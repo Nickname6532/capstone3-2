@@ -80,6 +80,19 @@ def _map_row(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
     return mapped, warnings
 
 
+def looks_like_license_file(filename: str, content: bytes) -> bool:
+    """헤더가 라이선스 양식(라이선스 키 또는 만료일+사이트명 컬럼)으로 보이는지 판별한다.
+    클레임 가져오기에 라이선스 파일을 잘못 올렸을 때 안내하기 위함."""
+    try:
+        rows = bulk_import.parse_rows(filename, content)
+    except ValueError:
+        return False
+    if not rows:
+        return False
+    fields = {COLUMN_ALIASES.get(_normalize_header(k)) for k in rows[0] if k}
+    return "license_key" in fields or {"customer", "end_date"} <= fields
+
+
 def import_rows(
     filename: str, content: bytes, default_product_name: str = ""
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:

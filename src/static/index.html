@@ -92,6 +92,13 @@
       <p class="hint">엑셀(.xlsx)/CSV 이력을 한 번에 등록 — "고객사/제품/내용/상태/담당자/접수일" 헤더 자동 인식</p>
     </div>
     <div class="row">
+      <label>가져올 데이터 종류
+        <select id="import-kind">
+          <option value="claims">클레임 이력</option>
+          <option value="licenses">라이선스(사이트별) — 사이트명/라이선스 키/구분/구독기간/시작일/만료일</option>
+        </select>
+      </label>
+      <label id="import-product-label" hidden>제품명 기본값 <input id="import-product" value="VMware" placeholder="예: VMware" /></label>
       <label>파일 선택 <input id="import-file" type="file" accept=".csv,.xlsx" /></label>
       <div style="display:flex; align-items:flex-end;">
         <button id="import-btn" type="button">가져오기</button>
@@ -228,6 +235,6 @@
 </div>
 
 <script src="/static/phone-format.js?v=2"></script>
-<script src="/static/app.js?v=9"></script>
+<script src="/static/app.js?v=10"></script>
 </body>
 </html>

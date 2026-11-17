@@ -233,7 +233,7 @@ def test_customer_product_license_crud_and_overview(store):
     product = store.create_product(customer["id"], "냉장고")
     store.update_product(product["id"], "냉장고 K200")
     lic = store.create_license(product["id"], "Standard", _iso(-10), _iso(10), "ops@a.com", warning_days=7, license_key="KEY-1")
-    assert lic["warning_days"] == 7 and store.find_license_by_key(product["id"], "KEY-1") is not None
+    assert lic["warning_days"] == 7 and store.find_license_by_key("KEY-1") is not None
     store.create_claim({"customer": "가나전자", "product": "냉장고", "description": "D", "customer_id": customer["id"]})
     overview = store.get_customer_overview(customer["id"])
     assert overview["claim_count"] == 1 and len(overview["licenses"]) == 1

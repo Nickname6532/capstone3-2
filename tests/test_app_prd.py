@@ -222,7 +222,7 @@ def test_license_import_creates_customers_products_and_licenses(client):
     assert res.json()["imported_count"] == 3
     customers = client.get("/api/customers").json()
     assert {c["name"] for c in customers} == {"삼선전자", "계몽대학교"}
-    assert next(c for c in customers if c["name"] == "삼선전자")["memo"] == "코스피"
+    assert next(c for c in customers if c["name"] == "삼선전자")["category"] == "코스피"
     sam = [l for l in client.get("/api/licenses").json() if l["customer_name"] == "삼선전자"]
     assert len(sam) == 2 and all(l["product_name"] == "VMware" for l in sam)
     assert {l["license_key"] for l in sam} == {"JHNJOMXXO-2K1M9YRWC", "JO06I63PL-63HUV284Z"}
@@ -293,3 +293,71 @@ def test_admin_can_reset_another_admins_password(client):
     assert client.post("/api/admin/accounts/otheradmin/reset-password", json={"new_password": "ResetByPeerAdmin1"}).status_code == 200
     ok = TestClient(client.app).post("/api/auth/login", json={"username": "otheradmin", "password": "ResetByPeerAdmin1"})
     assert ok.status_code == 200 and ok.json()["role"] == "admin"
+
+
+# ---------------------------------------------------------------- VMware 라이선스 양식: 구분/요약/내보내기/잘못된 파일 안내
+
+def test_license_import_stores_category_on_customer(client):
+    client.post("/api/licenses/import", params={"default_product_name": "VMware"}, files={"file": ("v.csv", VMWARE_CSV, "text/csv")})
+    customers = {c["name"]: c for c in client.get("/api/customers").json()}
+    assert customers["삼선전자"]["category"] == "코스피" and customers["계몽대학교"]["category"] == "대학"
+
+
+def test_license_site_summary_counts_by_site(client):
+    client.post("/api/licenses/import", params={"default_product_name": "VMware"}, files={"file": ("v.csv", VMWARE_CSV, "text/csv")})
+    summary = {s["site"]: s for s in client.get("/api/licenses/site-summary").json()}
+    assert summary["삼선전자"]["total"] == 2 and summary["삼선전자"]["category"] == "코스피"
+    assert summary["삼선전자"]["y1"] == 1 and summary["삼선전자"]["y5"] == 1
+    assert summary["계몽대학교"]["y3"] == 1
+
+
+def test_license_export_xlsx_roundtrips_through_import(client):
+    import io
+
+    from openpyxl import load_workbook
+
+    client.post("/api/licenses/import", params={"default_product_name": "VMware"}, files={"file": ("v.csv", VMWARE_CSV, "text/csv")})
+    res = client.get("/api/licenses/export.xlsx")
+    assert res.status_code == 200
+    wb = load_workbook(io.BytesIO(res.content))
+    assert wb.sheetnames == ["라이선스 목록", "사이트별 요약"]
+    header = [c.value for c in wb["라이선스 목록"][1]]
+    assert header == ["No", "라이선스 키", "사이트명", "구분", "구독기간(년)", "시작일", "만료일", "남은 일수", "상태"]
+    assert wb["라이선스 목록"].max_row == 4
+
+    # 내보낸 파일을 다시 가져오면 전부 중복(license_key)으로 인식되어야 한다.
+    again = client.post("/api/licenses/import", params={"default_product_name": "VMware"},
+                        files={"file": ("export.xlsx", res.content, "application/octet-stream")}).json()
+    assert again["imported_count"] == 0 and again["duplicate_count"] == 3
+
+
+def test_claims_import_rejects_license_formatted_file_with_hint(client):
+    res = client.post("/api/claims/import", files={"file": ("v.csv", VMWARE_CSV, "text/csv")})
+    assert res.status_code == 400 and "라이선스" in res.json()["detail"]
+
+
+def test_license_import_dedupes_by_key_across_products_and_within_file(client):
+    csv_bytes = (
+        "라이선스 키,사이트명,구분,구독기간(년),시작일,만료일\n"
+        "SAME-KEY-1,가고객,코스피,1,2026-01-01,2027-01-01\n"
+        "SAME-KEY-1,나고객,대학,3,2026-02-01,2029-02-01\n"  # 같은 파일 안에서 키 중복(다른 고객사)
+        "UNIQUE-2,나고객,대학,1,2026-03-01,2027-03-01\n"
+    ).encode("utf-8-sig")
+    body = client.post("/api/licenses/import", params={"default_product_name": "VMware"},
+                       files={"file": ("v.csv", csv_bytes, "text/csv")}).json()
+    assert body["imported_count"] == 2 and body["duplicate_count"] == 1
+    assert body["duplicate_rows"][0]["license_key"] == "SAME-KEY-1"
+    # 중복 행이 빈 고객사/제품을 만들어서는 안 된다
+    assert {l["license_key"] for l in client.get("/api/licenses").json()} == {"SAME-KEY-1", "UNIQUE-2"}
+
+    # 다른 제품명으로 다시 올려도 DB에 있는 키는 중복으로 걸러진다
+    again = client.post("/api/licenses/import", params={"default_product_name": "다른제품"},
+                        files={"file": ("v.csv", csv_bytes, "text/csv")}).json()
+    assert again["imported_count"] == 0 and again["duplicate_count"] == 3
+    assert not any(p["name"] == "다른제품" for p in client.get("/api/products").json())
+
+
+def test_license_import_dry_run_reports_key_duplicates(client):
+    client.post("/api/licenses/import", params={"default_product_name": "VMware"}, files={"file": ("v.csv", VMWARE_CSV, "text/csv")})
+    body = client.post("/api/licenses/import", params={"dry_run": "true"}, files={"file": ("v.csv", VMWARE_CSV, "text/csv")}).json()
+    assert body["duplicate_count"] == 3 and body["preview_rows"] == []

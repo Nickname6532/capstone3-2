@@ -273,6 +273,6 @@ def test_find_license_by_key(store):
     customer = store.create_customer("고객")
     product = store.create_product(customer["id"], "VMware")
     store.create_license(product["id"], "1년", _iso(-10), _iso(300), license_key="ABC-123")
-    assert store.find_license_by_key(product["id"], "ABC-123") is not None
-    assert store.find_license_by_key(product["id"], "ZZZ") is None
-    assert store.find_license_by_key(product["id"], "") is None
+    assert store.find_license_by_key("ABC-123") is not None
+    assert store.find_license_by_key("ZZZ") is None
+    assert store.find_license_by_key("") is None

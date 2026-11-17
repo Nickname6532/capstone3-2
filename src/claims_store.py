@@ -198,6 +198,7 @@ CREATE TABLE IF NOT EXISTS customers (
     contact TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL DEFAULT '',
     memo TEXT NOT NULL DEFAULT '',
+    category TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
 
@@ -305,7 +306,7 @@ class ClaimsStore:
                 self._conn.execute(f"ALTER TABLE claims ADD COLUMN {col} {ddl}")
 
         customers_cols = {row["name"] for row in self._conn.execute("PRAGMA table_info(customers)")}
-        for col in ("email", "memo"):
+        for col in ("email", "memo", "category"):
             if col not in customers_cols:
                 self._conn.execute(f"ALTER TABLE customers ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
 
@@ -796,12 +797,14 @@ class ClaimsStore:
     # 고객사-제품-라이선스 3단 구조. 라이선스 상태(구독중/만료임박/만료)는 저장하지
     # 않고 end_date를 기준으로 조회 시점에 계산한다 — 상태값을 따로 저장하면
     # "오늘 날짜가 지나서 만료됐는데 DB 값은 구독중"처럼 어긋나는 사고가 난다.
-    def create_customer(self, name: str, contact: str = "", email: str = "", memo: str = "") -> dict[str, Any]:
+    def create_customer(
+        self, name: str, contact: str = "", email: str = "", memo: str = "", category: str = ""
+    ) -> dict[str, Any]:
         with self._lock:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cur = self._conn.execute(
-                "INSERT INTO customers (name, contact, email, memo, created_at) VALUES (?, ?, ?, ?, ?)",
-                (name, contact, email, memo, now),
+                "INSERT INTO customers (name, contact, email, memo, category, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (name, contact, email, memo, category, now),
             )
             self._conn.commit()
             return self.get_customer(cur.lastrowid)
@@ -818,7 +821,7 @@ class ClaimsStore:
         with self._lock:
             if not self.get_customer(customer_id):
                 raise ValueError("존재하지 않는 고객사입니다")
-            fields = {k: updates[k] for k in ("name", "contact", "email", "memo") if k in updates and updates[k] is not None}
+            fields = {k: updates[k] for k in ("name", "contact", "email", "memo", "category") if k in updates and updates[k] is not None}
             if fields:
                 set_clause = ", ".join(f"{k}=?" for k in fields)
                 self._conn.execute(f"UPDATE customers SET {set_clause} WHERE id=?", (*fields.values(), customer_id))
@@ -926,12 +929,11 @@ class ClaimsStore:
             self._conn.commit()
             return self._get_license_joined(cur.lastrowid)
 
-    def find_license_by_key(self, product_id: int, license_key: str) -> Optional[dict[str, Any]]:
+    def find_license_by_key(self, license_key: str) -> Optional[dict[str, Any]]:
+        """라이선스 키는 고객사·제품과 무관하게 전체에서 유일해야 한다."""
         if not license_key:
             return None
-        row = self._conn.execute(
-            "SELECT * FROM licenses WHERE product_id=? AND license_key=?", (product_id, license_key)
-        ).fetchone()
+        row = self._conn.execute(self._LICENSE_JOIN_SQL + " WHERE l.license_key=?", (license_key,)).fetchone()
         return self._with_license_status(dict(row)) if row else None
 
     def update_license(self, license_id: int, updates: dict[str, Any]) -> dict[str, Any]:
