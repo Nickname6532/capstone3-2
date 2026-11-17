@@ -104,12 +104,12 @@ async function loadClaims() {
   claimsBody.innerHTML = claims.map(c => `
     <tr data-id="${c.claim_id}" class="s-${c.status}">
       <td class="num">${c.claim_id}</td>
-      <td class="num">${c.created_at}</td>
+      <td class="num">${escapeHtml((c.created_at || "").slice(0, 16))}</td>
       <td>${escapeHtml(c.channel || "내부입력")}</td>
       <td>${escapeHtml(c.customer)}</td>
       <td class="num">${escapeHtml(c.contact || "-")}</td>
       <td>${escapeHtml(c.product)}</td>
-      <td>${escapeHtml(c.category || "-")}</td>
+      <td class="type-cell">${escapeHtml(c.category || "-")}</td>
       <td class="desc-cell">${escapeHtml(c.description)}</td>
       <td><input class="assignee-input" value="${escapeHtml(c.assignee || "")}" placeholder="미배정" ${c.status === "완료" ? "disabled" : ""}/></td>
       <td>${difficultyBadge(c.difficulty)}</td>

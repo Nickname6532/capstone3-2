@@ -3,11 +3,11 @@
 
 :root {
   --ink: #12161f;
-  --surface: #1b2130;
+  --surface: #1c2333;
   --surface-raised: #212838;
-  --line: #2b3344;
-  --text: #e9ecf2;
-  --muted: #8891a3;
+  --line: #38425a;
+  --text: #f1f3f8;
+  --muted: #a9b2c4;
 
   --amber: #e3a13b;
   --amber-dim: #4a3c26;
@@ -52,8 +52,8 @@ body {
   font-family: var(--font-kr);
   background: var(--ink);
   color: var(--text);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 15px;
+  line-height: 1.55;
 }
 
 .num {
@@ -432,6 +432,88 @@ tbody tr.s-완료 td:first-child { border-left-color: var(--moss); }
 
 #import-result p { margin: 10px 0 2px; }
 #import-result ul { margin: 0 0 8px; padding-left: 18px; }
+
+
+/* ---------------------------------------------------------------- 가독성 개선 */
+
+/* label{display:flex}가 hidden 속성을 덮어써서 숨김 요소가 보이던 문제 방지 */
+[hidden] { display: none !important; }
+
+header h1 { font-size: 22px; }
+header .sub { font-size: 13.5px; }
+
+main { max-width: 1480px; }
+
+.panel { padding: 24px 26px; }
+.panel h2 { font-size: 16px; }
+.panel .hint { font-size: 13px; }
+
+label { font-size: 13.5px; color: var(--muted); font-weight: 500; }
+
+input, select, textarea { padding: 10px 12px; font-size: 14.5px; border-color: #46526c; }
+input::placeholder, textarea::placeholder { color: #7b859a; }
+input:focus, select:focus, textarea:focus { outline-color: var(--teal); }
+
+button { padding: 10px 18px; font-size: 14px; border-color: #46526c; }
+
+.board-seg .label { font-size: 13px; }
+.board-seg .value { font-size: 34px; }
+
+/* 표: 열이 찌그러지지 않도록 최소 폭을 주고 가로 스크롤은 표 안에서만 */
+.table-scroll { border: 1px solid var(--line); margin: 0; padding: 0; background: var(--ink); }
+
+table { min-width: 1000px; font-size: 14px; }
+
+th, td { padding: 11px 7px; }
+
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-raised);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  border-bottom: 2px solid var(--line);
+}
+
+tbody tr:nth-child(even) { background: rgba(255, 255, 255, 0.025); }
+tbody tr:hover { background: rgba(63, 156, 147, 0.10); }
+
+td { vertical-align: middle; }
+
+/* 내용: 세로로 쪼개지지 않게 최소 폭 + 단어 단위 줄바꿈 */
+.desc-cell {
+  min-width: 190px;
+  max-width: 260px;
+  white-space: pre-wrap;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  line-height: 1.55;
+}
+
+/* 담당자 입력칸: 이름이 잘리지 않게 충분한 폭 */
+.assignee-input { width: 98px; min-width: 98px; padding: 8px 10px; }
+
+/* 액션: 상태 선택 + 저장 + 상세를 한 줄로 */
+.actions { flex-wrap: nowrap; align-items: center; gap: 6px; }
+#claims-body .actions { display: grid; grid-template-columns: 1fr 1fr; min-width: 150px; }
+#claims-body .actions select { grid-column: 1 / -1; }
+.actions select { width: 100%; padding: 8px 10px; font-size: 13.5px; }
+.actions button { padding: 8px 11px; font-size: 13.5px; white-space: nowrap; }
+
+.status-word { font-weight: 600; white-space: nowrap; }
+td.num { white-space: nowrap; font-size: 13px; }
+td.type-cell { white-space: normal; min-width: 90px; max-width: 120px; line-height: 1.4; }
+
+.filters label { min-width: 150px; }
+
+.alert-row { font-size: 14px; padding: 10px 18px; }
+.analytics-row { font-size: 14px; }
+.analytics-figures { font-size: 13px; }
+
+.modal { max-width: 640px; }
+.history-list, .attach-list { font-size: 13.5px; }
 
 @media (max-width: 640px) {
   header { padding: 16px; }
