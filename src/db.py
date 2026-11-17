@@ -40,6 +40,14 @@ def build_store():
 
         return PgClaimsStore(database_url=database_url), None
 
+    if os.environ.get("VERCEL"):
+        # 서버리스의 /tmp는 인스턴스가 바뀌면 비워진다. SQLite로 조용히 동작하면
+        # 클레임/라이선스가 수시로 사라지므로 아예 시작을 막아 원인을 드러낸다.
+        raise RuntimeError(
+            "DATABASE_URL(또는 POSTGRES_URL)이 설정되지 않았습니다. Vercel에서는 Postgres가 "
+            "필수입니다(임시 저장소 사용 시 데이터가 사라짐). Storage 탭에서 Postgres를 연결하세요."
+        )
+
     from claim_logger import ClaimLogger
     from claims_store import ClaimsStore
 
