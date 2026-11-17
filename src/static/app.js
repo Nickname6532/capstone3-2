@@ -163,14 +163,20 @@ form.addEventListener("submit", async (e) => {
   if (form.dataset.productId) payload.product_id = Number(form.dataset.productId);
   if (form.dataset.licenseId) payload.license_id = Number(form.dataset.licenseId);
 
-  const res = await apiFetch("/api/claims", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  let res;
+  try {
+    res = await apiFetch("/api/claims", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  } catch (err) {
+    alert("접수 실패: 서버에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.");
+    return;
+  }
   if (!res.ok) {
-    const err = await res.json();
-    alert("접수 실패: " + JSON.stringify(err));
+    const err = await res.json().catch(() => ({}));
+    alert("접수 실패: " + (typeof err.detail === "string" ? err.detail : JSON.stringify(err.detail || err || res.status)));
     return;
   }
   const row = await res.json();

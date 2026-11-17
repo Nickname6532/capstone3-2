@@ -255,6 +255,14 @@ class PgClaimsStore:
             cur = conn.cursor()
             cur.execute(sql, params)
             return cur
+        except psycopg.Error:
+            # 실패한 트랜잭션을 그대로 두면 이 연결의 이후 모든 쿼리가
+            # "current transaction is aborted"로 실패한다(웜 인스턴스가 연결을 재사용).
+            try:
+                conn.rollback()
+            except psycopg.Error:
+                self._conn = None
+            raise
 
     # ------------------------------------------------------------------ #
     def create_claim(self, data: dict[str, Any]) -> dict[str, Any]:
