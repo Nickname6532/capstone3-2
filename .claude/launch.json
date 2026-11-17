@@ -3,7 +3,7 @@
   "configurations": [
     {
       "name": "claim-system",
-      "runtimeExecutable": "/Volumes/My_HDD/capstone3-2/.venv/bin/uvicorn",
+      "runtimeExecutable": "/Users/BDH/Downloads/capstone/.venv/bin/uvicorn",
       "runtimeArgs": ["--app-dir", "src", "app:app", "--port", "8000"],
       "port": 8000
     }

@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>클레임 접수</title>
-<link rel="stylesheet" href="/static/style.css?v=4" />
+<link rel="stylesheet" href="/static/style.css?v=6" />
 <style>
   main.narrow { max-width: 440px; }
 
@@ -73,6 +73,17 @@
     font-size: 12.5px;
     color: var(--muted);
   }
+
+  .tabs { display: flex; border: 1px solid var(--line); margin-bottom: 18px; }
+  .tab-btn {
+    flex: 1; border: none; background: var(--surface); color: var(--muted);
+    padding: 11px 8px; font-weight: 500; border-radius: 0;
+  }
+  .tab-btn.active { background: var(--teal); color: #0c1816; }
+  .tab-panel[hidden] { display: none; }
+
+  .track-status { padding: 4px 0; }
+  .track-status .value { font-weight: 600; }
 </style>
 </head>
 <body>
@@ -82,49 +93,116 @@
 </header>
 
 <main class="narrow">
-  <section id="form-panel">
-    <p class="lede">불편하셨던 내용을 적어주시면 담당자가 확인 후 순서대로 연락드립니다.</p>
-    <div class="panel">
-      <form id="public-claim-form">
-        <label>업체/성함 <input name="customer" required /></label>
-        <label>연락처 <input name="contact" id="contact-input" required placeholder="010-0000-0000" inputmode="numeric" /></label>
-        <label>서비스/플랜 <input name="product" required placeholder="예: Pro 플랜" /></label>
-        <label>불편 내용
-          <textarea name="description" rows="4" required placeholder="예: 로그인이 안 되거나 결제가 중복 청구된 경우 등을 적어주세요"></textarea>
-        </label>
-        <button type="submit" class="primary">접수하기</button>
-      </form>
-    </div>
-  </section>
+  <div class="tabs">
+    <button type="button" class="tab-btn active" id="tab-submit-btn">접수하기</button>
+    <button type="button" class="tab-btn" id="tab-track-btn">진행 상황 조회</button>
+  </div>
 
-  <section class="success" id="success-panel">
-    <div class="ticket">
-      <div class="ticket-top">
-        <p class="ok">접수 완료</p>
-        <h2>번호를 확인해주세요</h2>
+  <div class="tab-panel" id="tab-submit">
+    <section id="form-panel">
+      <p class="lede">불편하셨던 내용을 적어주시면 담당자가 확인 후 순서대로 연락드립니다.</p>
+      <div class="panel">
+        <form id="public-claim-form">
+          <label>업체/성함 <input name="customer" required /></label>
+          <label>연락처 <input name="contact" id="contact-input" required placeholder="010-0000-0000" inputmode="numeric" /></label>
+          <label>서비스/플랜 <input name="product" required placeholder="예: Pro 플랜" /></label>
+          <label>불편 내용
+            <textarea name="description" rows="4" required placeholder="예: 로그인이 안 되거나 결제가 중복 청구된 경우 등을 적어주세요"></textarea>
+          </label>
+          <label>스크린샷/영상 첨부(선택, 최대 3개) <input type="file" id="submit-files" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime" multiple /></label>
+          <button type="submit" class="primary">접수하기</button>
+        </form>
       </div>
-      <div class="perf"></div>
-      <div class="ticket-number">
-        <p class="label">접수번호</p>
-        <p class="id" id="result-claim-id"></p>
+    </section>
+
+    <section class="success" id="success-panel">
+      <div class="ticket">
+        <div class="ticket-top">
+          <p class="ok">접수 완료</p>
+          <h2>번호를 확인해주세요</h2>
+        </div>
+        <div class="perf"></div>
+        <div class="ticket-number">
+          <p class="label">접수번호</p>
+          <p class="id" id="result-claim-id"></p>
+        </div>
+      </div>
+      <p class="ticket-foot">담당자 확인 후 순서대로 연락드립니다. 이 번호와 연락처로 "진행 상황 조회" 탭에서 확인하실 수 있습니다.</p>
+    </section>
+  </div>
+
+  <div class="tab-panel" id="tab-track" hidden>
+    <p class="lede">접수번호와 접수 시 입력하신 연락처(뒷 4자리만 입력해도 확인 가능)를 입력해주세요.</p>
+    <div class="panel">
+      <form id="track-form">
+        <label>접수번호 <input name="claim_id" required placeholder="예: CLM-20261110-001" /></label>
+        <label>연락처 <input name="contact" required placeholder="010-0000-0000 또는 뒤 4자리" inputmode="numeric" /></label>
+        <button type="submit" class="primary">조회하기</button>
+      </form>
+      <p id="track-error" style="color: var(--coral); font-size: 13px; margin: 10px 0 0;"></p>
+    </div>
+
+    <div class="panel" id="track-result" style="margin-top: 14px; display: none;">
+      <div class="track-status"><span>상태</span> · <span class="value" id="track-status-value"></span></div>
+      <div class="track-status"><span>담당자 배정</span> · <span class="value" id="track-assigned-value"></span></div>
+      <div class="track-status" id="track-visit-row" style="display:none;"><span>방문 예정</span> · <span class="value" id="track-visit-value"></span></div>
+      <div class="track-status" id="track-resolution-row" style="display:none;"><span>처리 결과</span><br><span id="track-resolution-value"></span></div>
+
+      <div style="margin-top:14px;">
+        <p class="hint" style="margin-bottom:6px;">첨부파일</p>
+        <ul id="track-attachments" class="attach-list"></ul>
+      </div>
+
+      <div style="margin-top:14px;">
+        <p class="hint" style="margin-bottom:6px;">추가 문의/보충 설명</p>
+        <ul id="track-notes" class="history-list" style="margin-bottom:10px;"></ul>
+        <form id="track-note-form">
+          <textarea name="body" rows="2" placeholder="추가로 전달하실 내용을 적어주세요"></textarea>
+          <button type="submit" style="margin-top:8px;">등록</button>
+        </form>
+        <p class="hint" id="track-note-closed" style="display:none;">완료된 클레임에는 추가 등록이 불가합니다.</p>
       </div>
     </div>
-    <p class="ticket-foot">담당자 확인 후 순서대로 연락드립니다. 이 번호로 진행 상황을 문의하실 수 있습니다.</p>
-  </section>
+  </div>
 </main>
 
 <script src="/static/phone-format.js?v=2"></script>
 <script>
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  }
+
   attachPhoneAutoFormat(document.getElementById("contact-input"));
 
   const params = new URLSearchParams(location.search);
   const channel = params.get("channel") === "app" ? "앱" : "웹";
 
+  // ------------------------------------------------------------ 탭 전환
+  const tabSubmitBtn = document.getElementById("tab-submit-btn");
+  const tabTrackBtn = document.getElementById("tab-track-btn");
+  const tabSubmit = document.getElementById("tab-submit");
+  const tabTrack = document.getElementById("tab-track");
+
+  tabSubmitBtn.addEventListener("click", () => {
+    tabSubmitBtn.classList.add("active"); tabTrackBtn.classList.remove("active");
+    tabSubmit.hidden = false; tabTrack.hidden = true;
+  });
+  tabTrackBtn.addEventListener("click", () => {
+    tabTrackBtn.classList.add("active"); tabSubmitBtn.classList.remove("active");
+    tabTrack.hidden = false; tabSubmit.hidden = true;
+  });
+
+  if (location.pathname === "/track") tabTrackBtn.click();
+
+  // ------------------------------------------------------------ 접수하기
   const form = document.getElementById("public-claim-form");
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const fd = new FormData(form);
     const payload = Object.fromEntries(fd.entries());
+    delete payload["submit-files"];
     payload.channel = channel;
     payload.amount_krw = 0;
 
@@ -146,6 +224,16 @@
         return;
       }
       const row = await res.json();
+
+      const fileInput = document.getElementById("submit-files");
+      const files = Array.from(fileInput.files || []).slice(0, 3);
+      for (const file of files) {
+        const attFd = new FormData();
+        attFd.append("contact", payload.contact);
+        attFd.append("file", file);
+        await fetch(`/api/public/claims/${row.claim_id}/attachments`, { method: "POST", body: attFd }).catch(() => {});
+      }
+
       document.getElementById("result-claim-id").textContent = row.claim_id;
       document.getElementById("form-panel").style.display = "none";
       document.getElementById("success-panel").style.display = "block";
@@ -154,6 +242,99 @@
       btn.disabled = false;
       btn.textContent = "접수하기";
     }
+  });
+
+  // ------------------------------------------------------------ 진행 상황 조회
+  let trackedClaimId = null;
+  let trackedContact = null;
+
+  function attachmentIcon(contentType) {
+    return (contentType || "").startsWith("video/") ? "🎞" : "🖼";
+  }
+
+  async function renderTrackResult(data) {
+    document.getElementById("track-result").style.display = "block";
+    document.getElementById("track-status-value").textContent = data.sub_status ? `${data.status} (${data.sub_status})` : data.status;
+    document.getElementById("track-assigned-value").textContent = data.assignee_assigned ? "배정됨" : "배정 대기 중";
+
+    const visitRow = document.getElementById("track-visit-row");
+    if (data.scheduled_visit_at) {
+      visitRow.style.display = "block";
+      document.getElementById("track-visit-value").textContent = data.scheduled_visit_at;
+    } else {
+      visitRow.style.display = "none";
+    }
+
+    const resRow = document.getElementById("track-resolution-row");
+    if (data.resolution) {
+      resRow.style.display = "block";
+      document.getElementById("track-resolution-value").textContent = data.resolution;
+    } else {
+      resRow.style.display = "none";
+    }
+
+    document.getElementById("track-attachments").innerHTML = data.attachments.length
+      ? data.attachments.map(a => `<li>${attachmentIcon(a.content_type)} ${escapeHtml(a.filename)}</li>`).join("")
+      : `<li class="muted">첨부된 파일이 없습니다.</li>`;
+
+    document.getElementById("track-notes").innerHTML = data.notes.length
+      ? data.notes.map(n => `<li><span class="when">${escapeHtml(n.created_at)}</span>${escapeHtml(n.body)}</li>`).join("")
+      : `<li class="muted">등록된 문의가 없습니다.</li>`;
+
+    const noteForm = document.getElementById("track-note-form");
+    const closedMsg = document.getElementById("track-note-closed");
+    if (data.status === "완료") {
+      noteForm.style.display = "none";
+      closedMsg.style.display = "block";
+    } else {
+      noteForm.style.display = "block";
+      closedMsg.style.display = "none";
+    }
+  }
+
+  document.getElementById("track-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const claimId = fd.get("claim_id").trim();
+    const contact = fd.get("contact").trim();
+    const errorEl = document.getElementById("track-error");
+    errorEl.textContent = "";
+    document.getElementById("track-result").style.display = "none";
+
+    const res = await fetch("/api/public/claims/track", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ claim_id: claimId, contact }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      errorEl.textContent = err.detail || "조회에 실패했습니다.";
+      return;
+    }
+    trackedClaimId = claimId;
+    trackedContact = contact;
+    await renderTrackResult(await res.json());
+  });
+
+  document.getElementById("track-note-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!trackedClaimId) return;
+    const body = new FormData(e.target).get("body").trim();
+    if (!body) return;
+    const res = await fetch(`/api/public/claims/${trackedClaimId}/notes`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contact: trackedContact, body }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      alert(err.detail || "등록 실패");
+      return;
+    }
+    e.target.reset();
+    const refreshed = await fetch("/api/public/claims/track", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ claim_id: trackedClaimId, contact: trackedContact }),
+    }).then(r => r.json());
+    await renderTrackResult(refreshed);
   });
 </script>
 </body>

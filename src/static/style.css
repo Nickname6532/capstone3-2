@@ -296,6 +296,10 @@ tbody tr.s-완료 td:first-child { border-left-color: var(--moss); }
 .status-word.lic-만료임박 { color: var(--amber); }
 .status-word.lic-만료 { color: var(--coral); }
 
+.status-word.diff-low { color: var(--moss); }
+.status-word.diff-medium { color: var(--amber); }
+.status-word.diff-high { color: var(--coral); }
+
 /* ---------------------------------------------------------------- 라이선스 만료 경고 */
 
 .alert-board {
@@ -336,6 +340,94 @@ tbody tr.s-완료 td:first-child { border-left-color: var(--moss); }
 
 .desc-cell { max-width: 220px; white-space: pre-wrap; color: var(--text); }
 
+/* ---------------------------------------------------------------- 클레임 상세 모달 */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 15, 0.65);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+  z-index: 50;
+}
+
+.modal-backdrop[hidden] { display: none; }
+
+.modal {
+  width: 100%;
+  max-width: 560px;
+  max-height: 88vh;
+  overflow-y: auto;
+  background: var(--surface-raised);
+}
+
+.attach-section { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+
+.attach-section h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; color: var(--text); }
+
+.attach-list { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+
+.attach-list li { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; }
+
+.attach-list .muted { color: var(--muted); }
+
+.attach-delete-btn {
+  padding: 1px 6px;
+  font-size: 11px;
+  border-color: var(--line);
+  color: var(--muted);
+}
+.attach-delete-btn:hover { border-color: var(--coral); color: var(--coral); }
+
+.history-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 12.5px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.history-list li { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.history-list li:last-child { border-bottom: none; }
+.history-list .who { color: var(--text); }
+.history-list .when { color: var(--muted); margin-right: 6px; }
+
+/* ---------------------------------------------------------------- 담당자별 실적(막대) */
+
+.analytics-rows { display: flex; flex-direction: column; gap: 10px; }
+
+.analytics-row {
+  display: grid;
+  grid-template-columns: 90px 1fr auto;
+  align-items: center;
+  gap: 12px;
+  font-size: 13px;
+}
+
+.analytics-name { color: var(--text); font-weight: 500; }
+
+.analytics-bar-track {
+  display: block;
+  height: 8px;
+  background: var(--ink);
+  border: 1px solid var(--line);
+}
+
+.analytics-bar {
+  display: block;
+  height: 100%;
+  background: var(--teal);
+}
+
+.analytics-figures { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
 /* ---------------------------------------------------------------- 가져오기 결과 */
 
 #import-result p { margin: 10px 0 2px; }
@@ -361,4 +453,6 @@ tbody tr.s-완료 td:first-child { border-left-color: var(--moss); }
   .filters button { width: 100%; }
 
   .table-scroll { margin: 0 -14px; padding: 0 14px; }
+
+  .analytics-row { grid-template-columns: 1fr; gap: 4px; }
 }

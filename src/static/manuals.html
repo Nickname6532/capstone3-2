@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>매뉴얼 관리</title>
+<link rel="stylesheet" href="/static/style.css?v=6" />
+</head>
+<body>
+<header>
+  <h1>내부 매뉴얼 (FAQ·트러블슈팅)</h1>
+  <p class="sub"><a href="/">← 현황판으로</a></p>
+</header>
+
+<main>
+  <section class="panel">
+    <div class="panel-head">
+      <h2>매뉴얼 등록</h2>
+      <p class="hint">클레임 상세의 "유사 사례·매뉴얼 추천"에서 제품명/유형으로 검색돼 보여집니다</p>
+    </div>
+    <form id="manual-form">
+      <div class="row">
+        <label>제목 <input name="title" required placeholder="예: SSO 500 오류 대응" /></label>
+        <label>분류 <input name="category" placeholder="예: 로그인/인증 오류" /></label>
+        <label>관련 서비스 <input name="product_name" placeholder="예: Pro 플랜" /></label>
+      </div>
+      <label>키워드 <input name="keywords" placeholder="쉼표로 구분, 예: SSO,500,로그인,토큰" /></label>
+      <label>내용
+        <textarea name="content" rows="4" required placeholder="원인·조치 방법을 기록하세요"></textarea>
+      </label>
+      <button type="submit" class="primary">매뉴얼 등록</button>
+    </form>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
+      <h2>매뉴얼 목록</h2>
+      <div class="row" style="margin:0; max-width:280px;">
+        <label>검색 <input id="manual-search" placeholder="제목/분류/서비스/키워드" /></label>
+      </div>
+    </div>
+    <div id="manuals-list"></div>
+  </section>
+</main>
+
+<script>
+  function escapeHtml(str) {
+    const div = document.createElement("div");
+    div.textContent = str ?? "";
+    return div.innerHTML;
+  }
+
+  async function apiFetch(url, options) {
+    const res = await fetch(url, options);
+    if (res.status === 401) { location.href = "/login"; throw new Error("로그인이 필요합니다"); }
+    return res;
+  }
+
+  async function loadManuals() {
+    const q = document.getElementById("manual-search").value.trim();
+    const params = q ? `?q=${encodeURIComponent(q)}` : "";
+    const manuals = await apiFetch(`/api/manuals${params}`).then(r => r.json());
+    const listEl = document.getElementById("manuals-list");
+    listEl.innerHTML = manuals.length
+      ? manuals.map(m => `
+          <div class="panel" data-id="${m.id}" style="margin-bottom:10px;">
+            <div class="panel-head">
+              <h2 style="font-size:13px;">${escapeHtml(m.title)}</h2>
+              <div class="actions">
+                <button type="button" class="edit-btn">수정</button>
+                <button type="button" class="delete-btn">삭제</button>
+              </div>
+            </div>
+            <p class="hint">${escapeHtml(m.category || "미분류")} · ${escapeHtml(m.product_name || "-")} · ${escapeHtml(m.keywords || "")}</p>
+            <p style="white-space:pre-wrap;">${escapeHtml(m.content)}</p>
+          </div>
+        `).join("")
+      : `<p class="hint">등록된 매뉴얼이 없습니다.</p>`;
+
+    listEl.querySelectorAll("[data-id]").forEach(card => {
+      const id = Number(card.dataset.id);
+      const m = manuals.find(x => x.id === id);
+      card.querySelector(".edit-btn").addEventListener("click", async () => {
+        const title = prompt("제목", m.title); if (title === null) return;
+        const content = prompt("내용", m.content); if (content === null) return;
+        await apiFetch(`/api/manuals/${id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, content }),
+        });
+        await loadManuals();
+      });
+      card.querySelector(".delete-btn").addEventListener("click", async () => {
+        if (!confirm(`'${m.title}' 매뉴얼을 삭제할까요?`)) return;
+        await apiFetch(`/api/manuals/${id}`, { method: "DELETE" });
+        await loadManuals();
+      });
+    });
+  }
+
+  document.getElementById("manual-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const res = await apiFetch("/api/manuals", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(Object.fromEntries(fd.entries())),
+    });
+    if (res.ok) { e.target.reset(); await loadManuals(); }
+  });
+
+  let searchTimer;
+  document.getElementById("manual-search").addEventListener("input", () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(loadManuals, 250);
+  });
+
+  loadManuals();
+</script>
+</body>
+</html>

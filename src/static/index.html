@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>클레임 통합관리 시스템</title>
-<link rel="stylesheet" href="/static/style.css?v=4" />
+<link rel="stylesheet" href="/static/style.css?v=6" />
 </head>
 <body>
 <header style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; flex-wrap:wrap;">
@@ -28,16 +28,29 @@
 
   <section class="panel">
     <div class="panel-head">
+      <h2>담당자별 실적</h2>
+      <p class="hint"><a href="/api/stats/export.csv">CSV 내보내기 ↓</a> · <a href="/manuals">매뉴얼 관리 →</a></p>
+    </div>
+    <div id="analytics-body"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head">
       <h2>내부 접수</h2>
       <p class="hint">고객 직접 접수: <a href="/submit" target="_blank">/submit</a></p>
     </div>
     <form id="claim-form">
       <div class="row">
-        <label>고객사 <input name="customer" required /></label>
+        <label>고객사 <input name="customer" required list="customer-suggestions" /></label>
         <label>연락처 <input name="contact" id="internal-contact-input" placeholder="010-0000-0000" inputmode="numeric" /></label>
       </div>
+      <datalist id="customer-suggestions"></datalist>
+      <datalist id="product-suggestions"></datalist>
       <div class="row">
-        <label>서비스/플랜 <input name="product" required placeholder="예: Pro 플랜, Storage API" /></label>
+        <label>서비스/플랜
+          <input name="product" required placeholder="예: Pro 플랜, Storage API" list="product-suggestions" />
+          <span id="license-badge" class="hint"></span>
+        </label>
         <label>원인 유형
           <select name="category">
             <option value="">미분류</option>
@@ -52,6 +65,19 @@
         </label>
         <label>금액(원) <input name="amount_krw" type="number" value="0" /></label>
         <label>담당자 <input name="assignee" placeholder="선택" /></label>
+      </div>
+      <div class="row">
+        <label>난이도
+          <select name="difficulty">
+            <option value="">미정</option>
+            <option value="low">경미(Low)</option>
+            <option value="medium">보통(Medium)</option>
+            <option value="high">심각(High)</option>
+          </select>
+        </label>
+        <label>사진/영상 첨부(선택, 최대 3개)
+          <input type="file" id="claim-form-files" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime" multiple />
+        </label>
       </div>
       <label>클레임 내용
         <textarea name="description" rows="3" required placeholder="예: 어제 저녁부터 로그인이 안 된다는 문의, API 응답이 500으로 떨어짐"></textarea>
@@ -96,6 +122,14 @@
           <option>일괄가져오기</option>
         </select>
       </label>
+      <label>난이도
+        <select id="filter-difficulty">
+          <option value="">전체</option>
+          <option value="low">경미(Low)</option>
+          <option value="medium">보통(Medium)</option>
+          <option value="high">심각(High)</option>
+        </select>
+      </label>
       <label>담당자 <input id="filter-assignee" placeholder="내 이름으로 검색" /></label>
       <label>연락처 <input id="filter-contact" placeholder="하이픈 없이 검색 가능" inputmode="numeric" /></label>
       <label>검색 <input id="filter-q" placeholder="고객사 / 제품 / 내용" /></label>
@@ -106,7 +140,7 @@
         <thead>
           <tr>
             <th>ID</th><th>접수일시</th><th>채널</th><th>고객사</th><th>연락처</th><th>제품</th><th>유형</th>
-            <th>내용</th><th>담당자</th><th>상태</th><th>액션</th>
+            <th>내용</th><th>담당자</th><th>난이도</th><th>상태</th><th>액션</th>
           </tr>
         </thead>
         <tbody id="claims-body"></tbody>
@@ -115,7 +149,85 @@
   </section>
 </main>
 
+<datalist id="sub-status-suggestions">
+  <option value="접수대기"></option>
+  <option value="담당자배정"></option>
+  <option value="원인분석중"></option>
+  <option value="엔지니어방문예정"></option>
+  <option value="외부업체이관"></option>
+  <option value="고객확인대기"></option>
+  <option value="처리완료"></option>
+  <option value="재오픈"></option>
+</datalist>
+
+<div class="modal-backdrop" id="detail-modal" hidden>
+  <div class="modal panel">
+    <div class="panel-head">
+      <h2 id="detail-modal-title">클레임 상세</h2>
+      <div style="display:flex; gap:8px;">
+        <button type="button" id="detail-reopen-btn" hidden>재오픈</button>
+        <button type="button" id="detail-modal-close">닫기</button>
+      </div>
+    </div>
+    <div class="row">
+      <label>처리 유형
+        <select id="detail-processing-type">
+          <option value="">미정</option>
+          <option value="자체처리">자체처리</option>
+          <option value="엔지니어방문">엔지니어방문</option>
+          <option value="협력업체이관">협력업체이관</option>
+        </select>
+      </label>
+      <label>세부 상태 <input id="detail-sub-status" list="sub-status-suggestions" placeholder="예: 엔지니어방문예정" /></label>
+      <label>난이도
+        <select id="detail-difficulty">
+          <option value="">미정</option>
+          <option value="low">경미(Low)</option>
+          <option value="medium">보통(Medium)</option>
+          <option value="high">심각(High)</option>
+        </select>
+      </label>
+      <label>처리 소요시간(분) <input id="detail-processing-minutes" type="number" min="0" value="0" /></label>
+    </div>
+    <div class="row">
+      <label>방문/처리 시간 <input id="detail-visit-time" placeholder="예: 2026-11-12 14:00" /></label>
+      <label>방문 예정일시 <input id="detail-scheduled-visit" placeholder="예: 2026-11-20 10:00" /></label>
+      <label>방문 완료일시 <input id="detail-completed-visit" placeholder="예: 2026-11-20 11:00" /></label>
+    </div>
+    <div class="row">
+      <label>협력업체명 <input id="detail-partner-name" placeholder="협력업체이관 시 업체명" /></label>
+      <label>협력업체 연락처 <input id="detail-partner-contact" placeholder="담당자 연락처" /></label>
+    </div>
+    <label>처리 결과
+      <textarea id="detail-resolution" rows="3" placeholder="처리 내용을 기록하세요"></textarea>
+    </label>
+    <button type="button" id="detail-save-btn" class="primary">저장</button>
+
+    <div class="attach-section">
+      <h3>첨부파일</h3>
+      <ul id="detail-attachments" class="attach-list"></ul>
+      <div class="row">
+        <label>파일 추가 <input type="file" id="detail-file-input" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime" /></label>
+        <div style="display:flex; align-items:flex-end;">
+          <button type="button" id="detail-upload-btn">업로드</button>
+        </div>
+      </div>
+      <p class="hint">이미지/영상만 업로드 가능 (최대 25MB)</p>
+    </div>
+
+    <div class="attach-section">
+      <h3>처리 이력</h3>
+      <ul id="detail-history" class="history-list"></ul>
+    </div>
+
+    <div class="attach-section">
+      <h3>유사 사례 · 매뉴얼 추천</h3>
+      <div id="detail-recommendations"></div>
+    </div>
+  </div>
+</div>
+
 <script src="/static/phone-format.js?v=2"></script>
-<script src="/static/app.js?v=6"></script>
+<script src="/static/app.js?v=9"></script>
 </body>
 </html>
