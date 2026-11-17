@@ -61,6 +61,26 @@ COLUMN_ALIASES: dict[str, str] = {
     # completed_at
     "완료일": "completed_at", "처리일": "completed_at", "완료일자": "completed_at",
     "completedat": "completed_at",
+    # 처리상세 — 기존 이력에 처리유형/난이도/소요시간 등이 있는 경우 인식
+    "처리유형": "processing_type", "처리방식": "processing_type", "processingtype": "processing_type",
+    "난이도": "difficulty", "difficulty": "difficulty",
+    "방문시간": "visit_time", "방문일시": "visit_time", "visittime": "visit_time",
+    "처리결과": "resolution", "조치내용": "resolution", "resolution": "resolution",
+    "소요시간": "processing_minutes", "처리소요시간": "processing_minutes", "처리시간": "processing_minutes",
+    "processingminutes": "processing_minutes",
+    "협력업체": "partner_name", "이관업체": "partner_name", "partnername": "partner_name",
+}
+
+PROCESSING_TYPE_ALIASES = {
+    "자체처리": "자체처리", "직접처리": "자체처리", "내부처리": "자체처리",
+    "엔지니어방문": "엔지니어방문", "방문": "엔지니어방문", "현장방문": "엔지니어방문",
+    "협력업체이관": "협력업체이관", "외주": "협력업체이관", "외부업체": "협력업체이관", "서비스센터": "협력업체이관",
+}
+
+DIFFICULTY_ALIASES = {
+    "쉬움": "low", "하": "low", "경미": "low", "low": "low",
+    "보통": "medium", "중": "medium", "medium": "medium",
+    "어려움": "high", "상": "high", "심각": "high", "high": "high",
 }
 
 STATUS_ALIASES = {
@@ -135,6 +155,30 @@ def _map_row(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
         except ValueError:
             warnings.append(f"금액 '{mapped['amount_krw']}'을 숫자로 인식하지 못해 0으로 처리")
             mapped.pop("amount_krw")
+
+    if "processing_minutes" in mapped:
+        cleaned = str(mapped["processing_minutes"]).replace(",", "").replace("분", "").strip()
+        try:
+            mapped["processing_minutes"] = int(float(cleaned))
+        except ValueError:
+            warnings.append(f"소요시간 '{mapped['processing_minutes']}'을 숫자로 인식하지 못해 0으로 처리")
+            mapped.pop("processing_minutes")
+
+    if "processing_type" in mapped:
+        normalized = PROCESSING_TYPE_ALIASES.get(mapped["processing_type"].replace(" ", ""))
+        if normalized:
+            mapped["processing_type"] = normalized
+        else:
+            warnings.append(f"알 수 없는 처리유형 '{mapped['processing_type']}' → 미정으로 처리")
+            mapped.pop("processing_type")
+
+    if "difficulty" in mapped:
+        normalized = DIFFICULTY_ALIASES.get(mapped["difficulty"].replace(" ", ""))
+        if normalized:
+            mapped["difficulty"] = normalized
+        else:
+            warnings.append(f"알 수 없는 난이도 '{mapped['difficulty']}' → 미정으로 처리")
+            mapped.pop("difficulty")
 
     return mapped, warnings
 

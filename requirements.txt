@@ -5,3 +5,6 @@ openpyxl
 psycopg[binary]
 bcrypt
 itsdangerous
+
+# 선택 의존성: S3_BUCKET 환경변수로 첨부파일을 S3/R2/Supabase Storage에 저장할 때만 필요.
+# boto3

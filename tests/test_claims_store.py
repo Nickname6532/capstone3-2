@@ -3,6 +3,8 @@ import pytest
 from claim_logger import ClaimLogger
 from claims_store import (
     CHANNEL_WEB,
+    DIFFICULTY_HIGH,
+    PROCESSING_ENGINEER_VISIT,
     STATUS_DONE,
     STATUS_IN_PROGRESS,
     STATUS_RECEIVED,
@@ -40,11 +42,23 @@ def test_valid_status_transition(store):
     assert updated["status"] == STATUS_IN_PROGRESS
 
 
-def test_invalid_status_transition_rejected(store):
+def test_reopen_after_done_is_allowed_and_clears_completed_at(store):
+    """완료 후에도 재발·추가조치 시 처리중으로 되돌릴 수 있어야 한다."""
     row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
     store.update_claim(row["claim_id"], {"status": STATUS_DONE})
+    reopened = store.update_claim(row["claim_id"], {"status": STATUS_IN_PROGRESS, "note": "재발 접수"})
+    assert reopened["status"] == STATUS_IN_PROGRESS
+    assert reopened["completed_at"] == ""
+
+    history = store.list_claim_history(row["claim_id"])
+    assert history[-1]["action_type"] == "reopen"
+    assert history[-1]["note"] == "재발 접수"
+
+
+def test_invalid_status_transition_rejected(store):
+    row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
     with pytest.raises(InvalidTransition):
-        store.update_claim(row["claim_id"], {"status": STATUS_IN_PROGRESS})
+        store.update_claim(row["claim_id"], {"status": "존재안함"})
 
 
 def test_unknown_status_rejected(store):
@@ -121,3 +135,138 @@ def test_import_claim_detects_duplicate(store):
     store.import_claim(data)
     with pytest.raises(DuplicateClaim):
         store.import_claim(data)
+
+
+# ---------------------------------------------------------------- 처리상세 / 첨부파일
+
+def test_update_claim_records_processing_detail(store):
+    row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
+    updated = store.update_claim(
+        row["claim_id"],
+        {
+            "processing_type": PROCESSING_ENGINEER_VISIT,
+            "visit_time": "2026-11-12 14:00",
+            "resolution": "현장 점검 후 설정 초기화로 해결",
+            "difficulty": DIFFICULTY_HIGH,
+        },
+    )
+    assert updated["processing_type"] == PROCESSING_ENGINEER_VISIT
+    assert updated["difficulty"] == DIFFICULTY_HIGH
+    assert store.get_claim(row["claim_id"])["resolution"] == "현장 점검 후 설정 초기화로 해결"
+
+
+def test_update_claim_rejects_unknown_processing_type(store):
+    row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
+    with pytest.raises(ValueError):
+        store.update_claim(row["claim_id"], {"processing_type": "텔레포트"})
+
+
+def test_update_claim_rejects_unknown_difficulty(store):
+    row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
+    with pytest.raises(ValueError):
+        store.update_claim(row["claim_id"], {"difficulty": "불가능"})
+
+
+def test_add_list_delete_attachments(store):
+    row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
+    att = store.add_attachment(row["claim_id"], "screenshot.png", "abc123.png", "image/png", 2048)
+    assert store.list_attachments(row["claim_id"])[0]["stored_name"] == "abc123.png"
+    assert store.get_attachment(att["id"])["content_type"] == "image/png"
+
+    deleted = store.delete_attachment(att["id"])
+    assert deleted["id"] == att["id"]
+    assert store.get_attachment(att["id"]) is None
+    assert store.delete_attachment(att["id"]) is None
+
+
+def test_add_attachment_to_unknown_claim_raises(store):
+    with pytest.raises(ClaimNotFound):
+        store.add_attachment("CLM-NOPE-001", "x.png", "y.png", "image/png", 10)
+
+
+# ---------------------------------------------------------------- 처리이력 / 고객 코멘트
+
+def test_create_claim_logs_history(store):
+    row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
+    history = store.list_claim_history(row["claim_id"])
+    assert len(history) == 1
+    assert history[0]["action_type"] == "create"
+    assert history[0]["new_status"] == STATUS_RECEIVED
+
+
+def test_status_change_appends_history_entry(store):
+    row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
+    store.update_claim(row["claim_id"], {"status": STATUS_IN_PROGRESS, "changed_by": "kim", "note": "접수 확인"})
+    history = store.list_claim_history(row["claim_id"])
+    assert len(history) == 2
+    assert history[-1]["prev_status"] == STATUS_RECEIVED
+    assert history[-1]["new_status"] == STATUS_IN_PROGRESS
+    assert history[-1]["changed_by"] == "kim"
+    assert history[-1]["note"] == "접수 확인"
+
+
+def test_add_and_list_customer_notes(store):
+    row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
+    store.add_customer_note(row["claim_id"], "사진 추가로 첨부했습니다")
+    notes = store.list_customer_notes(row["claim_id"])
+    assert len(notes) == 1 and notes[0]["body"] == "사진 추가로 첨부했습니다"
+
+
+def test_add_customer_note_to_unknown_claim_raises(store):
+    with pytest.raises(ClaimNotFound):
+        store.add_customer_note("CLM-NOPE-001", "x")
+
+
+# ---------------------------------------------------------------- 매뉴얼 / 유사 클레임
+
+def test_manual_crud(store):
+    manual = store.create_manual("SSO 500 오류 대응", "로그인", "Pro 플랜", "SSO,500,로그인", "토큰 캐시를 지우고 재시도")
+    updated = store.update_manual(manual["id"], {"content": "토큰 캐시 삭제 후 재로그인 안내"})
+    assert updated["content"] == "토큰 캐시 삭제 후 재로그인 안내"
+    assert len(store.list_manuals(q="SSO")) == 1
+    store.delete_manual(manual["id"])
+    assert store.get_manual(manual["id"]) is None
+
+
+def test_find_similar_claims_prefers_same_product_and_category(store):
+    old = store.create_claim({"customer": "X", "product": "Pro 플랜", "category": "로그인/인증 오류", "description": "D1"})
+    store.update_claim(old["claim_id"], {"status": STATUS_IN_PROGRESS})
+    store.update_claim(old["claim_id"], {"status": STATUS_DONE, "resolution": "캐시 삭제로 해결"})
+
+    unrelated = store.create_claim({"customer": "Y", "product": "다른플랜", "category": "기타", "description": "D2"})
+    store.update_claim(unrelated["claim_id"], {"status": STATUS_IN_PROGRESS})
+    store.update_claim(unrelated["claim_id"], {"status": STATUS_DONE, "resolution": "무관한 해결"})
+
+    current = store.create_claim({"customer": "Z", "product": "Pro 플랜", "category": "로그인/인증 오류", "description": "D3"})
+    similar = store.find_similar_claims(current["claim_id"])
+    assert len(similar) == 1
+    assert similar[0]["claim_id"] == old["claim_id"]
+
+
+def test_find_similar_claims_excludes_unresolved(store):
+    unresolved = store.create_claim({"customer": "X", "product": "P", "category": "기타", "description": "D"})
+    store.update_claim(unresolved["claim_id"], {"status": STATUS_IN_PROGRESS})
+    store.update_claim(unresolved["claim_id"], {"status": STATUS_DONE})  # resolution 비어있음
+    current = store.create_claim({"customer": "Y", "product": "P", "category": "기타", "description": "D2"})
+    assert store.find_similar_claims(current["claim_id"]) == []
+
+
+# ---------------------------------------------------------------- 난이도 체계(low/medium/high)
+
+def test_legacy_korean_difficulty_values_migrated_to_english(tmp_path):
+    """예전 쉬움/보통/어려움(한글) 값이 저장된 기존 DB를 다시 열면 low/medium/high로 바뀌어야 한다."""
+    base_dir = tmp_path / "data"
+    first = ClaimsStore(base_dir=base_dir, logger=ClaimLogger(base_dir=tmp_path / "logs"))
+    row = first.create_claim({"customer": "A", "product": "P", "description": "D"})
+    first._conn.execute("UPDATE claims SET difficulty='어려움' WHERE claim_id=?", (row["claim_id"],))
+    first._conn.commit()
+
+    reopened = ClaimsStore(base_dir=base_dir, logger=ClaimLogger(base_dir=tmp_path / "logs"))
+    assert reopened.get_claim(row["claim_id"])["difficulty"] == DIFFICULTY_HIGH
+
+
+def test_list_claims_filters_by_difficulty(store):
+    low = store.create_claim({"customer": "A", "product": "P", "description": "D", "difficulty": "low"})
+    store.create_claim({"customer": "B", "product": "P", "description": "D", "difficulty": "high"})
+    results = store.list_claims(difficulty="low")
+    assert len(results) == 1 and results[0]["claim_id"] == low["claim_id"]

@@ -22,16 +22,26 @@ except Exception:
 
 pytestmark = pytest.mark.skipif(not PG_AVAILABLE, reason="로컬 Postgres(claim_test)에 연결할 수 없음")
 
-from claims_store import STATUS_DONE, STATUS_IN_PROGRESS, STATUS_RECEIVED, DuplicateClaim, InvalidTransition
+from claims_store import (
+    DIFFICULTY_HIGH,
+    PROCESSING_ENGINEER_VISIT,
+    STATUS_DONE,
+    STATUS_IN_PROGRESS,
+    STATUS_RECEIVED,
+    ClaimNotFound,
+    DuplicateClaim,
+    InvalidTransition,
+)
 from claims_store_pg import PgClaimsStore
 
 
 @pytest.fixture
 def store():
     s = PgClaimsStore(database_url=TEST_DATABASE_URL)
-    s._execute("TRUNCATE TABLE claims")
+    s._execute("TRUNCATE TABLE attachments, claim_history, claim_customer_notes, claims RESTART IDENTITY CASCADE")
     s._execute("TRUNCATE TABLE accounts")
-    s._execute("TRUNCATE TABLE licenses, products, customers RESTART IDENTITY CASCADE")
+    s._execute("TRUNCATE TABLE license_notification_logs, licenses, products, customers RESTART IDENTITY CASCADE")
+    s._execute("TRUNCATE TABLE manuals RESTART IDENTITY CASCADE")
     s._conn.commit()
     return s
 
@@ -123,7 +133,16 @@ def test_valid_and_invalid_transitions(store):
 
     store.update_claim(row["claim_id"], {"status": STATUS_DONE})
     with pytest.raises(InvalidTransition):
-        store.update_claim(row["claim_id"], {"status": STATUS_IN_PROGRESS})
+        store.update_claim(row["claim_id"], {"status": "존재안함"})
+
+
+def test_reopen_after_done_is_allowed(store):
+    row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
+    store.update_claim(row["claim_id"], {"status": STATUS_DONE})
+    reopened = store.update_claim(row["claim_id"], {"status": STATUS_IN_PROGRESS, "note": "재발"})
+    assert reopened["status"] == STATUS_IN_PROGRESS
+    assert reopened["completed_at"] == ""
+    assert store.list_claim_history(row["claim_id"])[-1]["action_type"] == "reopen"
 
 
 def test_import_claim_duplicate_detection(store):
@@ -172,3 +191,97 @@ def test_claim_id_sequence_survives_reconnect(store):
     seq_a = int(a["claim_id"].rsplit("-", 1)[-1])
     seq_b = int(b["claim_id"].rsplit("-", 1)[-1])
     assert seq_b == seq_a + 1
+
+
+# ---------------------------------------------------------------- 확장 기능 (SQLite 버전과 동일 인터페이스 검증)
+
+def _iso(days):
+    from datetime import date, timedelta
+
+    return (date.today() + timedelta(days=days)).isoformat()
+
+
+def test_update_claim_records_processing_detail(store):
+    row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
+    updated = store.update_claim(row["claim_id"], {"processing_type": PROCESSING_ENGINEER_VISIT, "difficulty": DIFFICULTY_HIGH,
+                                                   "sub_status": "엔지니어방문예정", "processing_minutes": 30})
+    assert updated["processing_type"] == PROCESSING_ENGINEER_VISIT and updated["difficulty"] == DIFFICULTY_HIGH
+    assert store.get_claim(row["claim_id"])["processing_minutes"] == 30
+    with pytest.raises(ValueError):
+        store.update_claim(row["claim_id"], {"processing_type": "텔레포트"})
+
+
+def test_attachments_and_notes_and_history(store):
+    row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
+    att = store.add_attachment(row["claim_id"], "a.png", "stored.png", "image/png", 10)
+    assert store.list_attachments(row["claim_id"])[0]["id"] == att["id"]
+    assert store.delete_attachment(att["id"])["id"] == att["id"]
+    with pytest.raises(ClaimNotFound):
+        store.add_attachment("CLM-NOPE-001", "x.png", "y.png", "image/png", 10)
+
+    store.add_customer_note(row["claim_id"], "사진 추가 첨부")
+    assert store.list_customer_notes(row["claim_id"])[0]["body"] == "사진 추가 첨부"
+
+    store.update_claim(row["claim_id"], {"status": STATUS_IN_PROGRESS, "changed_by": "kim"})
+    history = store.list_claim_history(row["claim_id"])
+    assert len(history) == 2 and history[-1]["changed_by"] == "kim"
+
+
+def test_customer_product_license_crud_and_overview(store):
+    customer = store.create_customer("가나전자", email="ops@gana.com")
+    assert store.update_customer(customer["id"], {"memo": "VIP"})["memo"] == "VIP"
+    product = store.create_product(customer["id"], "냉장고")
+    store.update_product(product["id"], "냉장고 K200")
+    lic = store.create_license(product["id"], "Standard", _iso(-10), _iso(10), "ops@a.com", warning_days=7, license_key="KEY-1")
+    assert lic["warning_days"] == 7 and store.find_license_by_key(product["id"], "KEY-1") is not None
+    store.create_claim({"customer": "가나전자", "product": "냉장고", "description": "D", "customer_id": customer["id"]})
+    overview = store.get_customer_overview(customer["id"])
+    assert overview["claim_count"] == 1 and len(overview["licenses"]) == 1
+
+    store.update_license(lic["id"], {"notify_target_option": "staff"})
+    store.log_license_notification(lic["id"], ["ops@a.com"], 5, True)
+    assert store.list_license_notification_logs(lic["id"])[0]["success"] == 1
+    store.delete_license(lic["id"])
+    store.delete_product(product["id"])
+    store.delete_customer(customer["id"])
+    assert store.get_customer(customer["id"]) is None
+
+
+def test_manual_crud_and_find_similar_claims(store):
+    manual = store.create_manual("제목", "분류", "제품", "키워드", "내용")
+    store.update_manual(manual["id"], {"content": "수정된 내용"})
+    assert store.get_manual(manual["id"])["content"] == "수정된 내용"
+    assert len(store.list_manuals(q="제목")) == 1
+    store.delete_manual(manual["id"])
+
+    old = store.create_claim({"customer": "X", "product": "P", "category": "C", "description": "D1"})
+    store.update_claim(old["claim_id"], {"status": STATUS_IN_PROGRESS})
+    store.update_claim(old["claim_id"], {"status": STATUS_DONE, "resolution": "해결함"})
+    current = store.create_claim({"customer": "Y", "product": "P", "category": "C", "description": "D2"})
+    similar = store.find_similar_claims(current["claim_id"])
+    assert len(similar) == 1 and similar[0]["claim_id"] == old["claim_id"]
+
+
+def test_account_management(store):
+    from auth import hash_password
+
+    store.create_account("acc1", hash_password("Password123"), "staff")
+    assert store.set_account_active("acc1", False)["is_active"] == 0
+    store.unlock_account("acc1")
+    store.set_account_password("acc1", hash_password("NewPassword456"))
+    with pytest.raises(ValueError):
+        store.set_account_active("nobody", True)
+
+
+def test_legacy_korean_difficulty_values_migrated_on_reconnect(store):
+    row = store.create_claim({"customer": "A", "product": "P", "description": "D"})
+    store._execute("UPDATE claims SET difficulty='어려움' WHERE claim_id=%s", (row["claim_id"],))
+    store._conn.commit()
+    assert PgClaimsStore(database_url=TEST_DATABASE_URL).get_claim(row["claim_id"])["difficulty"] == "high"
+
+
+def test_list_claims_filters_by_difficulty(store):
+    low = store.create_claim({"customer": "A", "product": "P", "description": "D", "difficulty": "low"})
+    store.create_claim({"customer": "B", "product": "P", "description": "D", "difficulty": "high"})
+    results = store.list_claims(difficulty="low")
+    assert len(results) == 1 and results[0]["claim_id"] == low["claim_id"]

@@ -23,6 +23,9 @@ def client(tmp_path, monkeypatch):
     test_store.create_account("tester", hash_password("Tester1234!!"), "admin", "테스터")
     monkeypatch.setattr(app_module, "logger", test_logger)
     monkeypatch.setattr(app_module, "store", test_store)
+    from storage import LocalAttachmentStorage
+
+    monkeypatch.setattr(app_module, "attachment_storage", LocalAttachmentStorage(tmp_path / "attachments"))
 
     test_client = TestClient(app_module.app)
     login_res = test_client.post("/api/auth/login", json={"username": "tester", "password": "Tester1234!!"})
@@ -57,7 +60,7 @@ def test_public_claim_rejects_invalid_channel(client):
     assert res.status_code == 400
 
 
-def test_patch_invalid_transition_returns_400(client):
+def test_patch_reopen_after_done_succeeds(client):
     res = client.post(
         "/api/claims", json={"customer": "A", "product": "P", "description": "D"}
     )
@@ -65,6 +68,16 @@ def test_patch_invalid_transition_returns_400(client):
     client.patch(f"/api/claims/{claim_id}", json={"status": "완료"})
 
     res = client.patch(f"/api/claims/{claim_id}", json={"status": "처리중"})
+    assert res.status_code == 200
+    assert res.json()["status"] == "처리중"
+
+
+def test_patch_invalid_transition_returns_400(client):
+    res = client.post(
+        "/api/claims", json={"customer": "A", "product": "P", "description": "D"}
+    )
+    claim_id = res.json()["claim_id"]
+    res = client.patch(f"/api/claims/{claim_id}", json={"status": "존재안함"})
     assert res.status_code == 400
 
 

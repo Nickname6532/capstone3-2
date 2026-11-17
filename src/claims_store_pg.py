@@ -43,13 +43,18 @@ from claims_store import (
     LICENSE_EXPIRING,
     LICENSE_SUBSCRIBED,
     LICENSE_WARNING_DAYS,
+    NOTIFY_TARGET_BOTH,
     STATUS_DONE,
     STATUS_IN_PROGRESS,
     STATUS_RECEIVED,
     VALID_CHANNELS,
+    VALID_DIFFICULTIES,
+    VALID_NOTIFY_TARGETS,
+    VALID_PROCESSING_TYPES,
     VALID_STATUSES,
     VALID_TRANSITIONS,
     ClaimNotFound,
+    ClaimsStore,
     DuplicateClaim,
     InvalidTransition,
 )
@@ -71,10 +76,80 @@ CREATE TABLE IF NOT EXISTS claims (
     completed_at TEXT NOT NULL DEFAULT '',
     tokens_input INTEGER NOT NULL DEFAULT 0,
     tokens_output INTEGER NOT NULL DEFAULT 0,
-    cost_krw DOUBLE PRECISION NOT NULL DEFAULT 0
+    cost_krw DOUBLE PRECISION NOT NULL DEFAULT 0,
+    processing_type TEXT NOT NULL DEFAULT '',
+    visit_time TEXT NOT NULL DEFAULT '',
+    resolution TEXT NOT NULL DEFAULT '',
+    difficulty TEXT NOT NULL DEFAULT '',
+    customer_id INTEGER,
+    product_id INTEGER,
+    license_id INTEGER,
+    sub_status TEXT NOT NULL DEFAULT '',
+    processing_minutes INTEGER NOT NULL DEFAULT 0,
+    partner_name TEXT NOT NULL DEFAULT '',
+    partner_contact TEXT NOT NULL DEFAULT '',
+    scheduled_visit_at TEXT NOT NULL DEFAULT '',
+    completed_visit_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
 CREATE INDEX IF NOT EXISTS idx_claims_channel ON claims(channel);
+
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS processing_type TEXT NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS visit_time TEXT NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS resolution TEXT NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS difficulty TEXT NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS customer_id INTEGER;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS product_id INTEGER;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS license_id INTEGER;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS sub_status TEXT NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS processing_minutes INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS partner_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS partner_contact TEXT NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS scheduled_visit_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS completed_visit_at TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS claim_history (
+    id SERIAL PRIMARY KEY,
+    claim_id TEXT NOT NULL REFERENCES claims(claim_id),
+    changed_by TEXT NOT NULL DEFAULT '',
+    prev_status TEXT NOT NULL DEFAULT '',
+    new_status TEXT NOT NULL DEFAULT '',
+    action_type TEXT NOT NULL DEFAULT 'update',
+    note TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_claim_history_claim ON claim_history(claim_id);
+
+CREATE TABLE IF NOT EXISTS claim_customer_notes (
+    id SERIAL PRIMARY KEY,
+    claim_id TEXT NOT NULL REFERENCES claims(claim_id),
+    body TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_claim_notes_claim ON claim_customer_notes(claim_id);
+
+CREATE TABLE IF NOT EXISTS manuals (
+    id SERIAL PRIMARY KEY,
+    title TEXT NOT NULL,
+    category TEXT NOT NULL DEFAULT '',
+    product_name TEXT NOT NULL DEFAULT '',
+    keywords TEXT NOT NULL DEFAULT '',
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_manuals_category ON manuals(category);
+
+CREATE TABLE IF NOT EXISTS attachments (
+    id SERIAL PRIMARY KEY,
+    claim_id TEXT NOT NULL REFERENCES claims(claim_id),
+    filename TEXT NOT NULL,
+    stored_name TEXT NOT NULL,
+    content_type TEXT NOT NULL DEFAULT '',
+    size_bytes INTEGER NOT NULL DEFAULT 0,
+    uploaded_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_attachments_claim ON attachments(claim_id);
 
 CREATE TABLE IF NOT EXISTS accounts (
     username TEXT PRIMARY KEY,
@@ -92,8 +167,12 @@ CREATE TABLE IF NOT EXISTS customers (
     id SERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     contact TEXT NOT NULL DEFAULT '',
+    email TEXT NOT NULL DEFAULT '',
+    memo TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS email TEXT NOT NULL DEFAULT '';
+ALTER TABLE customers ADD COLUMN IF NOT EXISTS memo TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS products (
     id SERIAL PRIMARY KEY,
@@ -111,9 +190,29 @@ CREATE TABLE IF NOT EXISTS licenses (
     end_date TEXT NOT NULL,
     notify_emails TEXT NOT NULL DEFAULT '',
     last_notified_at TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    warning_days INTEGER NOT NULL DEFAULT 30,
+    notify_staff_emails TEXT NOT NULL DEFAULT '',
+    notify_customer_emails TEXT NOT NULL DEFAULT '',
+    notify_target_option TEXT NOT NULL DEFAULT 'both',
+    license_key TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_licenses_product ON licenses(product_id);
+ALTER TABLE licenses ADD COLUMN IF NOT EXISTS warning_days INTEGER NOT NULL DEFAULT 30;
+ALTER TABLE licenses ADD COLUMN IF NOT EXISTS notify_staff_emails TEXT NOT NULL DEFAULT '';
+ALTER TABLE licenses ADD COLUMN IF NOT EXISTS notify_customer_emails TEXT NOT NULL DEFAULT '';
+ALTER TABLE licenses ADD COLUMN IF NOT EXISTS notify_target_option TEXT NOT NULL DEFAULT 'both';
+ALTER TABLE licenses ADD COLUMN IF NOT EXISTS license_key TEXT NOT NULL DEFAULT '';
+
+CREATE TABLE IF NOT EXISTS license_notification_logs (
+    id SERIAL PRIMARY KEY,
+    license_id INTEGER NOT NULL REFERENCES licenses(id),
+    sent_at TEXT NOT NULL,
+    recipients TEXT NOT NULL DEFAULT '',
+    days_left INTEGER,
+    success INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_license_notif_license ON license_notification_logs(license_id);
 """
 
 
@@ -125,6 +224,9 @@ class PgClaimsStore:
         self._ensure_conn()
         with self._conn.cursor() as cur:
             cur.execute(_SCHEMA)
+            # 예전엔 난이도를 쉬움/보통/어려움(한글)으로 저장했다 — low/medium/high로 한 번만 옮긴다.
+            for old, new in (("쉬움", "low"), ("보통", "medium"), ("어려움", "high")):
+                cur.execute("UPDATE claims SET difficulty=%s WHERE difficulty=%s", (new, old))
         self._conn.commit()
 
     # ------------------------------------------------------------------ #
@@ -177,9 +279,23 @@ class PgClaimsStore:
                 "tokens_input": int(data.get("tokens_input") or 0),
                 "tokens_output": int(data.get("tokens_output") or 0),
                 "cost_krw": float(data.get("cost_krw") or 0),
+                "processing_type": data.get("processing_type", ""),
+                "visit_time": data.get("visit_time", ""),
+                "resolution": data.get("resolution", ""),
+                "difficulty": data.get("difficulty", ""),
+                "customer_id": data.get("customer_id"),
+                "product_id": data.get("product_id"),
+                "license_id": data.get("license_id"),
+                "sub_status": data.get("sub_status", ""),
+                "processing_minutes": int(data.get("processing_minutes") or 0),
+                "partner_name": data.get("partner_name", ""),
+                "partner_contact": data.get("partner_contact", ""),
+                "scheduled_visit_at": data.get("scheduled_visit_at", ""),
+                "completed_visit_at": data.get("completed_visit_at", ""),
             }
             placeholders = ", ".join(f"%({f})s" for f in FIELDS)
             self._execute(f"INSERT INTO claims ({', '.join(FIELDS)}) VALUES ({placeholders})", row)
+            self._record_history(claim_id, changed_by=data.get("assignee", ""), prev_status="", new_status=row["status"], action_type="create", note="")
             self._conn.commit()
             return row
 
@@ -230,9 +346,23 @@ class PgClaimsStore:
                 "tokens_input": 0,
                 "tokens_output": 0,
                 "cost_krw": 0.0,
+                "processing_type": data.get("processing_type", ""),
+                "visit_time": data.get("visit_time", ""),
+                "resolution": data.get("resolution", ""),
+                "difficulty": data.get("difficulty", ""),
+                "customer_id": data.get("customer_id"),
+                "product_id": data.get("product_id"),
+                "license_id": data.get("license_id"),
+                "sub_status": data.get("sub_status", ""),
+                "processing_minutes": int(data.get("processing_minutes") or 0),
+                "partner_name": data.get("partner_name", ""),
+                "partner_contact": data.get("partner_contact", ""),
+                "scheduled_visit_at": data.get("scheduled_visit_at", ""),
+                "completed_visit_at": data.get("completed_visit_at", ""),
             }
             placeholders = ", ".join(f"%({f})s" for f in FIELDS)
             self._execute(f"INSERT INTO claims ({', '.join(FIELDS)}) VALUES ({placeholders})", row)
+            self._record_history(claim_id, changed_by="", prev_status="", new_status=status, action_type="import", note="")
             self._conn.commit()
             return row
 
@@ -243,6 +373,7 @@ class PgClaimsStore:
         channel: Optional[str] = None,
         contact: Optional[str] = None,
         q: Optional[str] = None,
+        difficulty: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         clauses = []
         params: list[Any] = []
@@ -255,6 +386,9 @@ class PgClaimsStore:
         if channel:
             clauses.append("channel = %s")
             params.append(channel)
+        if difficulty:
+            clauses.append("difficulty = %s")
+            params.append(difficulty)
         if contact:
             clauses.append("REPLACE(contact, '-', '') LIKE %s")
             digits_only = "".join(ch for ch in contact if ch.isdigit())
@@ -280,12 +414,17 @@ class PgClaimsStore:
         return dict(row)
 
     def update_claim(self, claim_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+        updates = dict(updates)
+        changed_by = updates.pop("changed_by", "") or ""
+        history_note = updates.pop("note", "") or ""
+
         with self._lock:
             cur = self._execute("SELECT * FROM claims WHERE claim_id = %s", (claim_id,))
             current = cur.fetchone()
             if current is None:
                 raise ClaimNotFound(claim_id)
             row = dict(current)
+            prev_status = row["status"]
 
             new_status = updates.get("status")
             if new_status is not None and new_status != row["status"]:
@@ -296,16 +435,31 @@ class PgClaimsStore:
                 row["status"] = new_status
                 if new_status == STATUS_DONE:
                     row["completed_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                elif prev_status == STATUS_DONE:
+                    row["completed_at"] = ""
 
-            for key in ("assignee", "category", "amount_krw", "description", "tokens_input", "tokens_output", "cost_krw"):
+            for key in (
+                "assignee", "category", "amount_krw", "description", "tokens_input", "tokens_output", "cost_krw",
+                "processing_type", "visit_time", "resolution", "difficulty",
+                "customer_id", "product_id", "license_id", "sub_status", "processing_minutes",
+                "partner_name", "partner_contact", "scheduled_visit_at", "completed_visit_at",
+            ):
                 if key in updates and updates[key] is not None:
                     row[key] = updates[key]
+
+            if row.get("processing_type") and row["processing_type"] not in VALID_PROCESSING_TYPES:
+                raise ValueError(f"알 수 없는 처리 유형: {row['processing_type']}")
+            if row.get("difficulty") and row["difficulty"] not in VALID_DIFFICULTIES:
+                raise ValueError(f"알 수 없는 난이도: {row['difficulty']}")
 
             row["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
             self._execute(
                 """UPDATE claims SET updated_at=%s, status=%s, assignee=%s, category=%s, amount_krw=%s,
-                   description=%s, completed_at=%s, tokens_input=%s, tokens_output=%s, cost_krw=%s
+                   description=%s, completed_at=%s, tokens_input=%s, tokens_output=%s, cost_krw=%s,
+                   processing_type=%s, visit_time=%s, resolution=%s, difficulty=%s,
+                   customer_id=%s, product_id=%s, license_id=%s, sub_status=%s, processing_minutes=%s,
+                   partner_name=%s, partner_contact=%s, scheduled_visit_at=%s, completed_visit_at=%s
                    WHERE claim_id=%s""",
                 (
                     row["updated_at"],
@@ -318,11 +472,45 @@ class PgClaimsStore:
                     row["tokens_input"],
                     row["tokens_output"],
                     row["cost_krw"],
+                    row["processing_type"],
+                    row["visit_time"],
+                    row["resolution"],
+                    row["difficulty"],
+                    row.get("customer_id"),
+                    row.get("product_id"),
+                    row.get("license_id"),
+                    row.get("sub_status", ""),
+                    row.get("processing_minutes", 0),
+                    row.get("partner_name", ""),
+                    row.get("partner_contact", ""),
+                    row.get("scheduled_visit_at", ""),
+                    row.get("completed_visit_at", ""),
                     claim_id,
                 ),
             )
+
+            if row["status"] != prev_status or history_note:
+                self._record_history(
+                    claim_id, changed_by=changed_by, prev_status=prev_status, new_status=row["status"],
+                    action_type="reopen" if (prev_status == STATUS_DONE and row["status"] != STATUS_DONE) else "status_change",
+                    note=history_note,
+                )
             self._conn.commit()
             return row
+
+    def _record_history(
+        self, claim_id: str, changed_by: str, prev_status: str, new_status: str, action_type: str, note: str
+    ) -> None:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        self._execute(
+            """INSERT INTO claim_history (claim_id, changed_by, prev_status, new_status, action_type, note, created_at)
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (claim_id, changed_by or "", prev_status, new_status, action_type, note or "", now),
+        )
+
+    def list_claim_history(self, claim_id: str) -> list[dict[str, Any]]:
+        cur = self._execute("SELECT * FROM claim_history WHERE claim_id=%s ORDER BY created_at, id", (claim_id,))
+        return [dict(r) for r in cur.fetchall()]
 
     def stats_summary(self) -> dict[str, Any]:
         """claims 테이블에서 직접 집계한다 — /tmp CSV에 의존하지 않아 인스턴스가 바뀌어도 값이 유지된다."""
@@ -418,14 +606,41 @@ class PgClaimsStore:
     def _account_public(account: dict[str, Any]) -> dict[str, Any]:
         return {k: v for k, v in account.items() if k != "password_hash"}
 
+    def set_account_active(self, username: str, is_active: bool) -> dict[str, Any]:
+        with self._lock:
+            if not self.get_account(username):
+                raise ValueError(f"존재하지 않는 아이디입니다: {username}")
+            self._execute("UPDATE accounts SET is_active=%s WHERE username=%s", (1 if is_active else 0, username))
+            self._conn.commit()
+            return self._account_public(self.get_account(username))
+
+    def unlock_account(self, username: str) -> dict[str, Any]:
+        with self._lock:
+            if not self.get_account(username):
+                raise ValueError(f"존재하지 않는 아이디입니다: {username}")
+            self._execute("UPDATE accounts SET failed_attempts=0, locked_until='' WHERE username=%s", (username,))
+            self._conn.commit()
+            return self._account_public(self.get_account(username))
+
+    def set_account_password(self, username: str, password_hash: str) -> dict[str, Any]:
+        with self._lock:
+            if not self.get_account(username):
+                raise ValueError(f"존재하지 않는 아이디입니다: {username}")
+            self._execute(
+                "UPDATE accounts SET password_hash=%s, failed_attempts=0, locked_until='' WHERE username=%s",
+                (password_hash, username),
+            )
+            self._conn.commit()
+            return self._account_public(self.get_account(username))
+
     # ------------------------------------------------------------------ #
     # 고객사 / 제품 / 라이선스 — SQLite 버전(ClaimsStore)과 동일한 인터페이스
-    def create_customer(self, name: str, contact: str = "") -> dict[str, Any]:
+    def create_customer(self, name: str, contact: str = "", email: str = "", memo: str = "") -> dict[str, Any]:
         with self._lock:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cur = self._execute(
-                "INSERT INTO customers (name, contact, created_at) VALUES (%s, %s, %s) RETURNING id",
-                (name, contact, now),
+                "INSERT INTO customers (name, contact, email, memo, created_at) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (name, contact, email, memo, now),
             )
             new_id = cur.fetchone()["id"]
             self._conn.commit()
@@ -438,6 +653,44 @@ class PgClaimsStore:
 
     def list_customers(self) -> list[dict[str, Any]]:
         cur = self._execute("SELECT * FROM customers ORDER BY name")
+        return [dict(r) for r in cur.fetchall()]
+
+    def update_customer(self, customer_id: int, updates: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            if not self.get_customer(customer_id):
+                raise ValueError("존재하지 않는 고객사입니다")
+            fields = {k: updates[k] for k in ("name", "contact", "email", "memo") if k in updates and updates[k] is not None}
+            if fields:
+                set_clause = ", ".join(f"{k}=%s" for k in fields)
+                self._execute(f"UPDATE customers SET {set_clause} WHERE id=%s", (*fields.values(), customer_id))
+                self._conn.commit()
+            return self.get_customer(customer_id)
+
+    def delete_customer(self, customer_id: int) -> None:
+        with self._lock:
+            cur = self._execute("SELECT 1 FROM products WHERE customer_id=%s", (customer_id,))
+            if cur.fetchone():
+                raise ValueError("등록된 제품이 있는 고객사는 삭제할 수 없습니다 (먼저 제품을 삭제하세요)")
+            self._execute("DELETE FROM customers WHERE id=%s", (customer_id,))
+            self._conn.commit()
+
+    def get_customer_overview(self, customer_id: int) -> dict[str, Any]:
+        customer = self.get_customer(customer_id)
+        if not customer:
+            raise ValueError("존재하지 않는 고객사입니다")
+        products = self.list_products(customer_id=customer_id)
+        licenses = self.list_licenses(customer_id=customer_id)
+        claims = self.list_claims_by_customer(customer_id)
+        return {
+            "customer": customer,
+            "products": products,
+            "licenses": licenses,
+            "claims": claims,
+            "claim_count": len(claims),
+        }
+
+    def list_claims_by_customer(self, customer_id: int) -> list[dict[str, Any]]:
+        cur = self._execute("SELECT * FROM claims WHERE customer_id=%s ORDER BY created_at DESC", (customer_id,))
         return [dict(r) for r in cur.fetchall()]
 
     def create_product(self, customer_id: int, name: str) -> dict[str, Any]:
@@ -454,6 +707,11 @@ class PgClaimsStore:
             cur = self._execute("SELECT * FROM products WHERE id=%s", (new_id,))
             return dict(cur.fetchone())
 
+    def get_product(self, product_id: int) -> Optional[dict[str, Any]]:
+        cur = self._execute("SELECT * FROM products WHERE id=%s", (product_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
     def list_products(self, customer_id: Optional[int] = None) -> list[dict[str, Any]]:
         if customer_id:
             cur = self._execute("SELECT * FROM products WHERE customer_id=%s ORDER BY name", (customer_id,))
@@ -461,22 +719,86 @@ class PgClaimsStore:
             cur = self._execute("SELECT * FROM products ORDER BY name")
         return [dict(r) for r in cur.fetchall()]
 
+    def update_product(self, product_id: int, name: str) -> dict[str, Any]:
+        with self._lock:
+            if not self.get_product(product_id):
+                raise ValueError("존재하지 않는 제품입니다")
+            self._execute("UPDATE products SET name=%s WHERE id=%s", (name, product_id))
+            self._conn.commit()
+            return self.get_product(product_id)
+
+    def delete_product(self, product_id: int) -> None:
+        with self._lock:
+            cur = self._execute("SELECT 1 FROM licenses WHERE product_id=%s", (product_id,))
+            if cur.fetchone():
+                raise ValueError("등록된 라이선스가 있는 제품은 삭제할 수 없습니다 (먼저 라이선스를 삭제하세요)")
+            self._execute("DELETE FROM products WHERE id=%s", (product_id,))
+            self._conn.commit()
+
     def create_license(
-        self, product_id: int, plan_name: str, start_date: str, end_date: str, notify_emails: str = ""
+        self,
+        product_id: int,
+        plan_name: str,
+        start_date: str,
+        end_date: str,
+        notify_emails: str = "",
+        warning_days: int = LICENSE_WARNING_DAYS,
+        notify_staff_emails: str = "",
+        notify_customer_emails: str = "",
+        notify_target_option: str = NOTIFY_TARGET_BOTH,
+        license_key: str = "",
     ) -> dict[str, Any]:
         with self._lock:
             cur = self._execute("SELECT 1 FROM products WHERE id=%s", (product_id,))
             if not cur.fetchone():
                 raise ValueError("존재하지 않는 제품입니다")
+            if notify_target_option not in VALID_NOTIFY_TARGETS:
+                raise ValueError(f"알 수 없는 알림 대상 옵션: {notify_target_option}")
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             cur = self._execute(
-                """INSERT INTO licenses (product_id, plan_name, start_date, end_date, notify_emails, created_at)
-                   VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
-                (product_id, plan_name, start_date, end_date, notify_emails, now),
+                """INSERT INTO licenses
+                   (product_id, plan_name, start_date, end_date, notify_emails, created_at,
+                    warning_days, notify_staff_emails, notify_customer_emails, notify_target_option, license_key)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                (
+                    product_id, plan_name, start_date, end_date, notify_emails, now,
+                    warning_days, notify_staff_emails, notify_customer_emails, notify_target_option, license_key,
+                ),
             )
             new_id = cur.fetchone()["id"]
             self._conn.commit()
             return self._get_license_joined(new_id)
+
+    def find_license_by_key(self, product_id: int, license_key: str) -> Optional[dict[str, Any]]:
+        if not license_key:
+            return None
+        cur = self._execute("SELECT * FROM licenses WHERE product_id=%s AND license_key=%s", (product_id, license_key))
+        row = cur.fetchone()
+        return self._with_license_status(dict(row)) if row else None
+
+    def update_license(self, license_id: int, updates: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            cur = self._execute("SELECT 1 FROM licenses WHERE id=%s", (license_id,))
+            if not cur.fetchone():
+                raise ValueError("존재하지 않는 라이선스입니다")
+            allowed = (
+                "plan_name", "start_date", "end_date", "notify_emails", "warning_days",
+                "notify_staff_emails", "notify_customer_emails", "notify_target_option", "license_key",
+            )
+            fields = {k: updates[k] for k in allowed if k in updates and updates[k] is not None}
+            if "notify_target_option" in fields and fields["notify_target_option"] not in VALID_NOTIFY_TARGETS:
+                raise ValueError(f"알 수 없는 알림 대상 옵션: {fields['notify_target_option']}")
+            if fields:
+                set_clause = ", ".join(f"{k}=%s" for k in fields)
+                self._execute(f"UPDATE licenses SET {set_clause} WHERE id=%s", (*fields.values(), license_id))
+                self._conn.commit()
+            return self._get_license_joined(license_id)
+
+    def delete_license(self, license_id: int) -> None:
+        with self._lock:
+            self._execute("DELETE FROM license_notification_logs WHERE license_id=%s", (license_id,))
+            self._execute("DELETE FROM licenses WHERE id=%s", (license_id,))
+            self._conn.commit()
 
     _LICENSE_JOIN_SQL = """
         SELECT l.*, p.name AS product_name, p.customer_id AS customer_id, c.name AS customer_name
@@ -513,6 +835,24 @@ class PgClaimsStore:
             self._execute("UPDATE licenses SET last_notified_at=%s WHERE id=%s", (now, license_id))
             self._conn.commit()
 
+    def log_license_notification(
+        self, license_id: int, recipients: list[str], days_left: Optional[int], success: bool
+    ) -> None:
+        with self._lock:
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            self._execute(
+                """INSERT INTO license_notification_logs (license_id, sent_at, recipients, days_left, success)
+                   VALUES (%s, %s, %s, %s, %s)""",
+                (license_id, now, ", ".join(recipients), days_left, 1 if success else 0),
+            )
+            self._conn.commit()
+
+    def list_license_notification_logs(self, license_id: int) -> list[dict[str, Any]]:
+        cur = self._execute(
+            "SELECT * FROM license_notification_logs WHERE license_id=%s ORDER BY sent_at DESC", (license_id,)
+        )
+        return [dict(r) for r in cur.fetchall()]
+
     @staticmethod
     def _with_license_status(row: dict[str, Any]) -> dict[str, Any]:
         try:
@@ -521,11 +861,13 @@ class PgClaimsStore:
         except (ValueError, TypeError):
             days_left = None
 
+        warning_days = row.get("warning_days") or LICENSE_WARNING_DAYS
+
         if days_left is None:
             status = "알수없음"
         elif days_left < 0:
             status = LICENSE_EXPIRED
-        elif days_left <= LICENSE_WARNING_DAYS:
+        elif days_left <= warning_days:
             status = LICENSE_EXPIRING
         else:
             status = LICENSE_SUBSCRIBED
@@ -533,3 +875,144 @@ class PgClaimsStore:
         row["status"] = status
         row["days_left"] = days_left
         return row
+
+    # notification_recipients는 DB에 의존하지 않는 순수 계산이라 SQLite 버전(ClaimsStore)의
+    # 구현을 그대로 재사용한다 — 백엔드마다 따로 유지하면 로직이 갈라질 위험이 있다.
+    notification_recipients = staticmethod(ClaimsStore.notification_recipients)
+
+    # ------------------------------------------------------------------ #
+    # 첨부파일 — SQLite 버전(ClaimsStore)과 동일한 메타데이터 인터페이스. 파일 바이트
+    # 자체는 app.py가 디스크에 저장하고, 여기엔 메타데이터만 기록한다.
+    def add_attachment(
+        self, claim_id: str, filename: str, stored_name: str, content_type: str, size_bytes: int
+    ) -> dict[str, Any]:
+        with self._lock:
+            cur = self._execute("SELECT 1 FROM claims WHERE claim_id=%s", (claim_id,))
+            if not cur.fetchone():
+                raise ClaimNotFound(claim_id)
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cur = self._execute(
+                """INSERT INTO attachments (claim_id, filename, stored_name, content_type, size_bytes, uploaded_at)
+                   VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
+                (claim_id, filename, stored_name, content_type, size_bytes, now),
+            )
+            new_id = cur.fetchone()["id"]
+            self._conn.commit()
+            cur = self._execute("SELECT * FROM attachments WHERE id=%s", (new_id,))
+            return dict(cur.fetchone())
+
+    def list_attachments(self, claim_id: str) -> list[dict[str, Any]]:
+        cur = self._execute("SELECT * FROM attachments WHERE claim_id=%s ORDER BY uploaded_at", (claim_id,))
+        return [dict(r) for r in cur.fetchall()]
+
+    def get_attachment(self, attachment_id: int) -> Optional[dict[str, Any]]:
+        cur = self._execute("SELECT * FROM attachments WHERE id=%s", (attachment_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def delete_attachment(self, attachment_id: int) -> Optional[dict[str, Any]]:
+        with self._lock:
+            att = self.get_attachment(attachment_id)
+            if att:
+                self._execute("DELETE FROM attachments WHERE id=%s", (attachment_id,))
+                self._conn.commit()
+            return att
+
+    # ------------------------------------------------------------------ #
+    # 고객 추가 문의/코멘트
+    def add_customer_note(self, claim_id: str, body: str) -> dict[str, Any]:
+        with self._lock:
+            cur = self._execute("SELECT 1 FROM claims WHERE claim_id=%s", (claim_id,))
+            if not cur.fetchone():
+                raise ClaimNotFound(claim_id)
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cur = self._execute(
+                "INSERT INTO claim_customer_notes (claim_id, body, created_at) VALUES (%s, %s, %s) RETURNING id",
+                (claim_id, body, now),
+            )
+            new_id = cur.fetchone()["id"]
+            self._conn.commit()
+            cur = self._execute("SELECT * FROM claim_customer_notes WHERE id=%s", (new_id,))
+            return dict(cur.fetchone())
+
+    def list_customer_notes(self, claim_id: str) -> list[dict[str, Any]]:
+        cur = self._execute("SELECT * FROM claim_customer_notes WHERE claim_id=%s ORDER BY created_at", (claim_id,))
+        return [dict(r) for r in cur.fetchall()]
+
+    # ------------------------------------------------------------------ #
+    # 내부 매뉴얼(FAQ/트러블슈팅)
+    def create_manual(self, title: str, category: str, product_name: str, keywords: str, content: str) -> dict[str, Any]:
+        with self._lock:
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cur = self._execute(
+                """INSERT INTO manuals (title, category, product_name, keywords, content, created_at, updated_at)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
+                (title, category, product_name, keywords, content, now, now),
+            )
+            new_id = cur.fetchone()["id"]
+            self._conn.commit()
+            return self.get_manual(new_id)
+
+    def get_manual(self, manual_id: int) -> Optional[dict[str, Any]]:
+        cur = self._execute("SELECT * FROM manuals WHERE id=%s", (manual_id,))
+        row = cur.fetchone()
+        return dict(row) if row else None
+
+    def list_manuals(self, q: Optional[str] = None) -> list[dict[str, Any]]:
+        if q:
+            like = f"%{q}%"
+            cur = self._execute(
+                """SELECT * FROM manuals WHERE title ILIKE %s OR keywords ILIKE %s OR category ILIKE %s
+                   OR product_name ILIKE %s ORDER BY updated_at DESC""",
+                (like, like, like, like),
+            )
+        else:
+            cur = self._execute("SELECT * FROM manuals ORDER BY updated_at DESC")
+        return [dict(r) for r in cur.fetchall()]
+
+    def update_manual(self, manual_id: int, updates: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            if not self.get_manual(manual_id):
+                raise ValueError("존재하지 않는 매뉴얼입니다")
+            allowed = ("title", "category", "product_name", "keywords", "content")
+            fields = {k: updates[k] for k in allowed if k in updates and updates[k] is not None}
+            if fields:
+                fields["updated_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                set_clause = ", ".join(f"{k}=%s" for k in fields)
+                self._execute(f"UPDATE manuals SET {set_clause} WHERE id=%s", (*fields.values(), manual_id))
+                self._conn.commit()
+            return self.get_manual(manual_id)
+
+    def delete_manual(self, manual_id: int) -> None:
+        with self._lock:
+            self._execute("DELETE FROM manuals WHERE id=%s", (manual_id,))
+            self._conn.commit()
+
+    # ------------------------------------------------------------------ #
+    # 유사 클레임 추천
+    def find_similar_claims(self, claim_id: str, limit: int = 5) -> list[dict[str, Any]]:
+        current = self.get_claim(claim_id)
+        clauses = ["status = %s", "claim_id != %s", "resolution != ''"]
+        params: list[Any] = [STATUS_DONE, claim_id]
+        if current.get("product"):
+            clauses.append("product = %s")
+            params.append(current["product"])
+        if current.get("category"):
+            clauses.append("category = %s")
+            params.append(current["category"])
+        sql = f"SELECT * FROM claims WHERE {' AND '.join(clauses)} ORDER BY completed_at DESC LIMIT %s"
+        cur = self._execute(sql, (*params, limit))
+        results = [dict(r) for r in cur.fetchall()]
+        if len(results) < limit and current.get("category"):
+            seen = {r["claim_id"] for r in results}
+            sql2 = """SELECT * FROM claims WHERE status=%s AND claim_id!=%s AND resolution!='' AND category=%s
+                      ORDER BY completed_at DESC LIMIT %s"""
+            cur2 = self._execute(sql2, (STATUS_DONE, claim_id, current["category"], limit))
+            for r in cur2.fetchall():
+                row = dict(r)
+                if row["claim_id"] not in seen:
+                    results.append(row)
+                    seen.add(row["claim_id"])
+                if len(results) >= limit:
+                    break
+        return results[:limit]

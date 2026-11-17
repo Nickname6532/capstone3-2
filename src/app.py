@@ -11,24 +11,30 @@
 
 from __future__ import annotations
 
+import csv
+import io
+import ipaddress
 import json
 import os
 import secrets
 import sqlite3
 import sys
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
 import psycopg
-from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
 import bulk_import
 import email_notify
+import license_import
+import storage as storage_module
 from auth import (
     ROLE_ADMIN,
     ROLE_STAFF,
@@ -37,8 +43,17 @@ from auth import (
     validate_username,
     verify_password,
 )
-from claims_store import CHANNEL_APP, CHANNEL_INTERNAL, CHANNEL_SMS, CHANNEL_WEB, ClaimNotFound, DuplicateClaim, InvalidTransition
-from db import build_store, get_database_url
+from claims_store import (
+    CHANNEL_APP,
+    CHANNEL_INTERNAL,
+    CHANNEL_SMS,
+    CHANNEL_WEB,
+    STATUS_DONE,
+    ClaimNotFound,
+    DuplicateClaim,
+    InvalidTransition,
+)
+from db import build_store, get_data_root, get_database_url
 
 app = FastAPI(title="클레임 통합관리 시스템")
 
@@ -53,6 +68,20 @@ CRON_SECRET = os.environ.get("CRON_SECRET")
 
 STATIC_DIR = BASE_DIR / "static"
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# 클레임 첨부파일(이미지/영상) 저장 위치 — DB(SQLite/Postgres)엔 메타데이터만 두고
+# 실제 바이트는 디스크에 둔다. Vercel 등 서버리스에서는 claims.db와 같은 이유로
+# /tmp에 쓰이므로 인스턴스가 바뀌면 사라질 수 있다(README에 안내).
+ATTACHMENTS_DIR = get_data_root() / "data" / "attachments"
+# S3_BUCKET 환경변수가 있으면 S3 호환 스토리지로, 없으면 로컬 디스크로 자동 전환된다
+# (storage.py). Vercel 등 서버리스는 로컬 디스크가 휘발되니 운영 단계엔 S3 연동 권장.
+attachment_storage = storage_module.build_attachment_storage(ATTACHMENTS_DIR)
+
+ALLOWED_ATTACHMENT_TYPES = {
+    "image/jpeg", "image/png", "image/gif", "image/webp",
+    "video/mp4", "video/webm", "video/quicktime",
+}
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024  # 25MB
 
 # 세션 쿠키 서명 키. 반드시 환경변수로 고정값을 줘야 한다 — 특히 Vercel 서버리스는
 # 인스턴스마다 프로세스가 새로 뜨는데, 그때마다 키가 달라지면 한 인스턴스에서 로그인한
@@ -77,6 +106,53 @@ app.add_middleware(
 )
 
 
+# 사내 업무 시스템용 IP 화이트리스트. ALLOWED_IPS(쉼표 구분 IP/CIDR, 예:
+# "127.0.0.1,192.168.0.0/16")가 설정된 경우에만 활성화된다 — 비어있으면 기존처럼
+# 모든 IP를 허용해 로컬 개발/외부 데모가 그대로 된다.
+_ALLOWED_NETWORKS: list = []
+for _part in os.environ.get("ALLOWED_IPS", "").split(","):
+    _part = _part.strip()
+    if not _part:
+        continue
+    try:
+        _ALLOWED_NETWORKS.append(ipaddress.ip_network(_part, strict=False))
+    except ValueError:
+        print(f"경고: ALLOWED_IPS의 잘못된 항목을 무시합니다: {_part}", file=sys.stderr)
+
+# 고객용 공개 경로와 Vercel Cron은 IP 제한 대상에서 제외한다.
+_IP_EXEMPT_PREFIXES = ("/submit", "/track", "/static/", "/api/public/")
+_IP_EXEMPT_EXACT = {"/api/channels/sms"}
+
+
+def _client_ip(request: Request) -> str:
+    # nginx 등 신뢰 프록시 뒤에 있을 때는 X-Forwarded-For의 첫 IP가 실제 클라이언트다.
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        return xff.split(",")[0].strip()
+    return request.client.host if request.client else ""
+
+
+def _ip_allowed(ip: str) -> bool:
+    if not _ALLOWED_NETWORKS:
+        return True
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any(addr in net for net in _ALLOWED_NETWORKS)
+
+
+@app.middleware("http")
+async def ip_whitelist(request: Request, call_next):
+    if _ALLOWED_NETWORKS:
+        path = request.url.path
+        is_cron = path == "/api/licenses/check-expiry" and request.headers.get("authorization", "").startswith("Bearer ")
+        is_exempt = path in _IP_EXEMPT_EXACT or any(path.startswith(p) for p in _IP_EXEMPT_PREFIXES) or is_cron
+        if not is_exempt and not _ip_allowed(_client_ip(request)):
+            return JSONResponse({"detail": "허용되지 않은 접속 위치입니다"}, status_code=403)
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def no_cache_static(request, call_next):
     """정적 파일(HTML/CSS/JS)을 항상 재검증하게 한다.
@@ -85,7 +161,7 @@ async def no_cache_static(request, call_next):
     캐시해서 수정사항이 반영 안 된 것처럼 보이는 문제가 실제로 있었다.
     """
     response = await call_next(request)
-    no_cache_paths = {"/", "/submit", "/login", "/admin", "/licenses"}
+    no_cache_paths = {"/", "/submit", "/track", "/login", "/admin", "/licenses", "/manuals"}
     if request.url.path in no_cache_paths or request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
@@ -209,6 +285,41 @@ def list_accounts(_: dict = Depends(require_admin)):
     return store.list_accounts()
 
 
+class AccountActiveUpdate(BaseModel):
+    is_active: bool
+
+
+class PasswordReset(BaseModel):
+    new_password: str
+
+
+@app.patch("/api/admin/accounts/{username}")
+def set_account_active(username: str, payload: AccountActiveUpdate, _: dict = Depends(require_admin)):
+    try:
+        return store.set_account_active(username, payload.is_active)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/admin/accounts/{username}/unlock")
+def unlock_account(username: str, _: dict = Depends(require_admin)):
+    try:
+        return store.unlock_account(username)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/admin/accounts/{username}/reset-password")
+def reset_account_password(username: str, payload: PasswordReset, _: dict = Depends(require_admin)):
+    err = validate_password_strength(payload.new_password)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        return store.set_account_password(username, hash_password(payload.new_password))
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
 # ---------------------------------------------------------------------- #
 # 고객사 / 제품 / 라이선스
 #
@@ -219,10 +330,23 @@ def list_accounts(_: dict = Depends(require_admin)):
 class CustomerCreate(BaseModel):
     name: str
     contact: Optional[str] = ""
+    email: Optional[str] = ""
+    memo: Optional[str] = ""
+
+
+class CustomerUpdate(BaseModel):
+    name: Optional[str] = None
+    contact: Optional[str] = None
+    email: Optional[str] = None
+    memo: Optional[str] = None
 
 
 class ProductCreate(BaseModel):
     customer_id: int
+    name: str
+
+
+class ProductUpdate(BaseModel):
     name: str
 
 
@@ -231,17 +355,60 @@ class LicenseCreate(BaseModel):
     plan_name: Optional[str] = ""
     start_date: str
     end_date: str
-    notify_emails: Optional[str] = ""  # 쉼표로 여러 명
+    notify_emails: Optional[str] = ""  # 쉼표로 여러 명 (과거 단일 필드, 분리 입력 전 데이터와의 호환용)
+    warning_days: Optional[int] = 30
+    notify_staff_emails: Optional[str] = ""
+    notify_customer_emails: Optional[str] = ""
+    notify_target_option: Optional[str] = "both"
+    license_key: Optional[str] = ""
+
+
+class LicenseUpdate(BaseModel):
+    plan_name: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    notify_emails: Optional[str] = None
+    warning_days: Optional[int] = None
+    notify_staff_emails: Optional[str] = None
+    notify_customer_emails: Optional[str] = None
+    notify_target_option: Optional[str] = None
+    license_key: Optional[str] = None
 
 
 @app.post("/api/customers")
 def create_customer(payload: CustomerCreate, _: dict = Depends(require_login)):
-    return store.create_customer(payload.name, payload.contact or "")
+    return store.create_customer(payload.name, payload.contact or "", payload.email or "", payload.memo or "")
 
 
 @app.get("/api/customers")
 def list_customers(_: dict = Depends(require_login)):
     return store.list_customers()
+
+
+@app.patch("/api/customers/{customer_id}")
+def update_customer(customer_id: int, payload: CustomerUpdate, _: dict = Depends(require_login)):
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    try:
+        return store.update_customer(customer_id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/customers/{customer_id}")
+def delete_customer(customer_id: int, _: dict = Depends(require_login)):
+    try:
+        store.delete_customer(customer_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"ok": True}
+
+
+@app.get("/api/customers/{customer_id}/overview")
+def customer_overview(customer_id: int, _: dict = Depends(require_login)):
+    try:
+        return store.get_customer_overview(customer_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @app.post("/api/products")
@@ -257,13 +424,36 @@ def list_products(customer_id: Optional[int] = None, _: dict = Depends(require_l
     return store.list_products(customer_id=customer_id)
 
 
+@app.patch("/api/products/{product_id}")
+def update_product(product_id: int, payload: ProductUpdate, _: dict = Depends(require_login)):
+    try:
+        return store.update_product(product_id, payload.name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/products/{product_id}")
+def delete_product(product_id: int, _: dict = Depends(require_login)):
+    try:
+        store.delete_product(product_id)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+    return {"ok": True}
+
+
 @app.post("/api/licenses")
 def create_license(payload: LicenseCreate, _: dict = Depends(require_login)):
     if payload.end_date < payload.start_date:
         raise HTTPException(status_code=400, detail="만료일은 시작일 이후여야 합니다")
     try:
         return store.create_license(
-            payload.product_id, payload.plan_name or "", payload.start_date, payload.end_date, payload.notify_emails or ""
+            payload.product_id, payload.plan_name or "", payload.start_date, payload.end_date,
+            payload.notify_emails or "",
+            warning_days=payload.warning_days or 30,
+            notify_staff_emails=payload.notify_staff_emails or "",
+            notify_customer_emails=payload.notify_customer_emails or "",
+            notify_target_option=payload.notify_target_option or "both",
+            license_key=payload.license_key or "",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -272,6 +462,107 @@ def create_license(payload: LicenseCreate, _: dict = Depends(require_login)):
 @app.get("/api/licenses")
 def list_licenses(customer_id: Optional[int] = None, _: dict = Depends(require_login)):
     return store.list_licenses(customer_id=customer_id)
+
+
+@app.patch("/api/licenses/{license_id}")
+def update_license(license_id: int, payload: LicenseUpdate, _: dict = Depends(require_login)):
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    if "start_date" in updates and "end_date" in updates and updates["end_date"] < updates["start_date"]:
+        raise HTTPException(status_code=400, detail="만료일은 시작일 이후여야 합니다")
+    try:
+        return store.update_license(license_id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.delete("/api/licenses/{license_id}")
+def delete_license(license_id: int, _: dict = Depends(require_login)):
+    store.delete_license(license_id)
+    return {"ok": True}
+
+
+@app.get("/api/licenses/{license_id}/notification-logs")
+def license_notification_logs(license_id: int, _: dict = Depends(require_login)):
+    return store.list_license_notification_logs(license_id)
+
+
+@app.post("/api/licenses/import")
+async def import_licenses(
+    file: UploadFile = File(...),
+    default_product_name: str = "",
+    dry_run: bool = False,
+    _: dict = Depends(require_login),
+):
+    """고객사·제품·라이선스를 엑셀/CSV로 일괄 등록한다 (예: 사이트명/라이선스키/구독기간 형식).
+
+    등록된 고객사·제품명과 일치하면 자동으로 연결하고, 없으면 새로 만든다. 같은
+    제품에 같은 license_key가 이미 있으면 중복으로 건너뛴다. dry_run=true면 실제로
+    DB에 쓰지 않고 인식된 매핑 결과만 미리보기로 돌려준다.
+    """
+    content = await file.read()
+    try:
+        ok_rows, failed_rows = license_import.import_rows(file.filename, content, default_product_name=default_product_name)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    imported_count = 0
+    duplicate_count = 0
+    warning_rows: list[dict[str, Any]] = []
+    preview_rows: list[dict[str, Any]] = []
+
+    for mapped in ok_rows:
+        warnings = mapped.pop("_warnings", None) or []
+        customer_name = mapped["customer"]
+        product_name = mapped["product"]
+        plan_name = mapped.get("plan_name", "")
+        start_date = mapped["start_date"]
+        end_date = mapped["end_date"]
+        license_key = mapped.get("license_key", "")
+
+        if dry_run:
+            preview_rows.append({
+                "customer": customer_name, "product": product_name, "plan_name": plan_name,
+                "start_date": start_date, "end_date": end_date, "license_key": license_key,
+                "warnings": warnings,
+            })
+            continue
+
+        customer = next((c for c in store.list_customers() if c["name"] == customer_name), None)
+        if not customer:
+            customer = store.create_customer(customer_name, memo=mapped.get("customer_category", ""))
+        product = next((p for p in store.list_products(customer_id=customer["id"]) if p["name"] == product_name), None)
+        if not product:
+            product = store.create_product(customer["id"], product_name)
+
+        if license_key and store.find_license_by_key(product["id"], license_key):
+            duplicate_count += 1
+            continue
+
+        try:
+            row = store.create_license(
+                product["id"], plan_name, start_date, end_date,
+                mapped.get("notify_emails", ""),
+                warning_days=mapped.get("warning_days", 30),
+                license_key=license_key,
+            )
+            imported_count += 1
+            if warnings:
+                warning_rows.append({"license_id": row["id"], "warnings": warnings})
+        except ValueError as e:
+            failed_rows.append({"row": None, "reason": str(e)})
+
+    result = {
+        "dry_run": dry_run,
+        "total_rows": len(ok_rows) + len(failed_rows),
+        "imported_count": imported_count,
+        "duplicate_count": duplicate_count,
+        "failed_count": len(failed_rows),
+        "failed_rows": failed_rows[:50],
+        "warnings": warning_rows[:50],
+    }
+    if dry_run:
+        result["preview_rows"] = preview_rows[:50]
+    return result
 
 
 @app.get("/api/licenses/expiring")
@@ -301,6 +592,58 @@ def licenses_page(request: Request):
 
 
 # ---------------------------------------------------------------------- #
+# 내부 매뉴얼(FAQ/트러블슈팅) — 유사 클레임과 함께 상세 모달 추천에 쓰인다.
+
+
+class ManualCreate(BaseModel):
+    title: str
+    category: Optional[str] = ""
+    product_name: Optional[str] = ""
+    keywords: Optional[str] = ""
+    content: str
+
+
+class ManualUpdate(BaseModel):
+    title: Optional[str] = None
+    category: Optional[str] = None
+    product_name: Optional[str] = None
+    keywords: Optional[str] = None
+    content: Optional[str] = None
+
+
+@app.post("/api/manuals")
+def create_manual(payload: ManualCreate, _: dict = Depends(require_login)):
+    return store.create_manual(payload.title, payload.category or "", payload.product_name or "", payload.keywords or "", payload.content)
+
+
+@app.get("/api/manuals")
+def list_manuals(q: Optional[str] = None, _: dict = Depends(require_login)):
+    return store.list_manuals(q=q)
+
+
+@app.patch("/api/manuals/{manual_id}")
+def update_manual(manual_id: int, payload: ManualUpdate, _: dict = Depends(require_login)):
+    updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    try:
+        return store.update_manual(manual_id, updates)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.delete("/api/manuals/{manual_id}")
+def delete_manual_endpoint(manual_id: int, _: dict = Depends(require_login)):
+    store.delete_manual(manual_id)
+    return {"ok": True}
+
+
+@app.get("/manuals")
+def manuals_page(request: Request):
+    if not current_user(request):
+        return RedirectResponse("/login")
+    return FileResponse(STATIC_DIR / "manuals.html")
+
+
+# ---------------------------------------------------------------------- #
 
 
 class ClaimCreate(BaseModel):
@@ -312,6 +655,19 @@ class ClaimCreate(BaseModel):
     assignee: Optional[str] = ""
     channel: Optional[str] = CHANNEL_INTERNAL  # 직원이 통화 내용을 대신 입력하는 창구 (기본값)
     contact: Optional[str] = ""
+    processing_type: Optional[str] = ""  # 자체처리/엔지니어방문/협력업체이관
+    visit_time: Optional[str] = ""
+    resolution: Optional[str] = ""
+    difficulty: Optional[str] = ""
+    customer_id: Optional[int] = None
+    product_id: Optional[int] = None
+    license_id: Optional[int] = None
+    sub_status: Optional[str] = ""
+    processing_minutes: Optional[int] = 0
+    partner_name: Optional[str] = ""
+    partner_contact: Optional[str] = ""
+    scheduled_visit_at: Optional[str] = ""
+    completed_visit_at: Optional[str] = ""
 
 
 class PublicClaimCreate(BaseModel):
@@ -343,6 +699,20 @@ class ClaimUpdate(BaseModel):
     category: Optional[str] = None
     amount_krw: Optional[float] = None
     description: Optional[str] = None
+    processing_type: Optional[str] = None
+    visit_time: Optional[str] = None
+    resolution: Optional[str] = None
+    difficulty: Optional[str] = None
+    customer_id: Optional[int] = None
+    product_id: Optional[int] = None
+    license_id: Optional[int] = None
+    sub_status: Optional[str] = None
+    processing_minutes: Optional[int] = None
+    partner_name: Optional[str] = None
+    partner_contact: Optional[str] = None
+    scheduled_visit_at: Optional[str] = None
+    completed_visit_at: Optional[str] = None
+    note: Optional[str] = None  # 상태 변경/재오픈 사유 등 — claim_history에만 남고 클레임 필드로는 저장 안 됨
 
 
 @app.get("/")
@@ -355,6 +725,12 @@ def root(request: Request):
 @app.get("/submit")
 def submit_page():
     """고객이 직접 접수하는 공개 웹 폼 (앱 웹뷰에서도 그대로 재사용 가능)."""
+    return FileResponse(STATIC_DIR / "submit.html")
+
+
+@app.get("/track")
+def track_page():
+    """고객이 접수번호+연락처로 진행 상황을 조회하는 공개 페이지."""
     return FileResponse(STATIC_DIR / "submit.html")
 
 
@@ -391,13 +767,106 @@ def create_claim_from_sms(payload: SmsInbound):
     return row
 
 
+# ---------------------------------------------------------------------- #
+# 고객용 티켓 조회/추적 (로그인 불필요)
+#
+# 접수번호만으로는 조회가 안 되게 접수 시 입력한 연락처로 본인 확인을 한다.
+# 존재하지 않는 접수번호와 연락처 불일치를 응답으로 구분하지 않는다(계정 로그인과
+# 같은 이유 — 어느 접수번호가 실재하는지 외부에 노출하지 않기 위함).
+def _contact_matches(stored_contact: str, provided_contact: str) -> bool:
+    stored_digits = "".join(ch for ch in (stored_contact or "") if ch.isdigit())
+    provided_digits = "".join(ch for ch in (provided_contact or "") if ch.isdigit())
+    if not stored_digits or len(provided_digits) < 4:
+        return False
+    return stored_digits == provided_digits or stored_digits.endswith(provided_digits)
+
+
+def _get_claim_for_customer(claim_id: str, contact: str) -> dict[str, Any]:
+    try:
+        claim = store.get_claim(claim_id)
+    except ClaimNotFound:
+        raise HTTPException(status_code=404, detail="접수번호 또는 연락처를 확인해주세요")
+    if not _contact_matches(claim.get("contact", ""), contact):
+        raise HTTPException(status_code=404, detail="접수번호 또는 연락처를 확인해주세요")
+    return claim
+
+
+class PublicTrackRequest(BaseModel):
+    claim_id: str
+    contact: str
+
+
+class PublicNoteCreate(BaseModel):
+    contact: str
+    body: str
+
+
+@app.post("/api/public/claims/track")
+def track_public_claim(payload: PublicTrackRequest):
+    """접수번호 + 연락처로 본인 확인 후 진행 상황만 돌려준다.
+
+    내부 전용 정보(담당자 실명, 원가, 타 고객사 데이터 등)는 응답에서 제외한다 —
+    고객에게는 "배정 여부"만 보여주고 담당자 이름은 내보내지 않는다.
+    """
+    claim = _get_claim_for_customer(payload.claim_id, payload.contact)
+    return {
+        "claim_id": claim["claim_id"],
+        "status": claim["status"],
+        "sub_status": claim.get("sub_status", ""),
+        "assignee_assigned": bool(claim.get("assignee")),
+        "scheduled_visit_at": claim.get("scheduled_visit_at", ""),
+        "resolution": claim.get("resolution", "") if claim["status"] == STATUS_DONE else "",
+        "created_at": claim["created_at"],
+        "updated_at": claim["updated_at"],
+        "notes": store.list_customer_notes(claim["claim_id"]),
+        "attachments": store.list_attachments(claim["claim_id"]),
+    }
+
+
+@app.post("/api/public/claims/{claim_id}/attachments")
+async def upload_public_attachment(claim_id: str, contact: str = Form(...), file: UploadFile = File(...)):
+    claim = _get_claim_for_customer(claim_id, contact)
+    if len(store.list_attachments(claim_id)) >= 3:
+        raise HTTPException(status_code=400, detail="첨부파일은 최대 3개까지 등록할 수 있습니다")
+    return await _save_attachment(claim_id, file)
+
+
+@app.post("/api/public/claims/{claim_id}/notes")
+def add_public_note(claim_id: str, payload: PublicNoteCreate):
+    """완료 전 클레임에 대해 고객이 추가 증상이나 보충 설명을 남길 수 있다."""
+    claim = _get_claim_for_customer(claim_id, payload.contact)
+    if claim["status"] == STATUS_DONE:
+        raise HTTPException(status_code=400, detail="이미 완료된 클레임에는 추가 등록할 수 없습니다")
+    return store.add_customer_note(claim_id, payload.body)
+
+
+def _resolve_customer_product(customer_name: str, product_name: str, auto_create: bool) -> tuple[Optional[int], Optional[int]]:
+    """고객사/제품명이 이미 등록되어 있으면 그 id로 연결하고, auto_create가 True면
+    등록되어 있지 않은 고객사/제품을 그 자리에서 새로 만든다."""
+    customer = next((c for c in store.list_customers() if c["name"] == customer_name), None)
+    if not customer and auto_create:
+        customer = store.create_customer(customer_name)
+    if not customer:
+        return None, None
+    product = next((p for p in store.list_products(customer_id=customer["id"]) if p["name"] == product_name), None)
+    if not product and auto_create:
+        product = store.create_product(customer["id"], product_name)
+    return customer["id"], (product["id"] if product else None)
+
+
 @app.post("/api/claims/import")
-async def import_claims(file: UploadFile = File(...), _: dict = Depends(require_login)):
+async def import_claims(
+    file: UploadFile = File(...),
+    dry_run: bool = False,
+    auto_create_master: bool = False,
+    _: dict = Depends(require_login),
+):
     """기업이 기존에 엑셀/CSV로 갖고 있던 클레임 이력을 일괄 등록한다.
 
     파일 자체가 문제(형식/용량/인코딩/손상)면 400으로 즉시 실패한다.
     행 단위 문제는 성공/중복/실패로 분류해서 보고하며, 한 행이 실패해도
-    나머지 행 처리는 계속된다.
+    나머지 행 처리는 계속된다. dry_run=true면 실제로 DB에 쓰지 않고
+    인식된 매핑·예상 등록/중복 건수만 미리보기로 돌려준다.
     """
     content = await file.read()
     try:
@@ -407,10 +876,34 @@ async def import_claims(file: UploadFile = File(...), _: dict = Depends(require_
 
     imported_count = 0
     warning_rows: list[dict[str, Any]] = []
+    preview_rows: list[dict[str, Any]] = []
     duplicate_rows = [{"row": d["row"], "reason": d["reason"]} for d in file_duplicates]
 
-    for i, mapped in enumerate(ok_rows, start=1):
-        warnings = mapped.pop("_warnings", None)
+    for mapped in ok_rows:
+        warnings = mapped.pop("_warnings", None) or []
+
+        if mapped.get("customer") and mapped.get("product"):
+            customer_id, product_id = _resolve_customer_product(mapped["customer"], mapped["product"], auto_create_master)
+            if customer_id:
+                mapped["customer_id"] = customer_id
+            if product_id:
+                mapped["product_id"] = product_id
+
+        if dry_run:
+            existing = store.find_duplicate(
+                mapped.get("customer", ""), mapped.get("product", ""), mapped.get("description", ""),
+                mapped.get("created_at") or "",
+            )
+            if existing:
+                duplicate_rows.append({"reason": f"기존 데이터와 동일 ({existing})"})
+            else:
+                preview_rows.append({
+                    "customer": mapped.get("customer"), "product": mapped.get("product"),
+                    "description": mapped.get("description"), "status": mapped.get("status", "접수"),
+                    "warnings": warnings,
+                })
+            continue
+
         try:
             row = store.import_claim(mapped)
             imported_count += 1
@@ -421,7 +914,8 @@ async def import_claims(file: UploadFile = File(...), _: dict = Depends(require_
         except (ValueError, sqlite3.Error, psycopg.Error) as e:
             failed_rows.append({"row": None, "reason": str(e)})
 
-    return {
+    result = {
+        "dry_run": dry_run,
         "total_rows": len(ok_rows) + len(duplicate_rows) + len(failed_rows),
         "imported_count": imported_count,
         "duplicate_count": len(duplicate_rows),
@@ -430,6 +924,9 @@ async def import_claims(file: UploadFile = File(...), _: dict = Depends(require_
         "failed_rows": [{"row": f["row"], "reason": f["reason"]} for f in failed_rows[:50]],
         "warnings": warning_rows[:50],
     }
+    if dry_run:
+        result["preview_rows"] = preview_rows[:50]
+    return result
 
 
 @app.get("/api/claims")
@@ -439,9 +936,10 @@ def list_claims(
     channel: Optional[str] = None,
     contact: Optional[str] = None,
     q: Optional[str] = None,
+    difficulty: Optional[str] = None,
     _: dict = Depends(require_login),
 ):
-    return store.list_claims(status=status, assignee=assignee, channel=channel, contact=contact, q=q)
+    return store.list_claims(status=status, assignee=assignee, channel=channel, contact=contact, q=q, difficulty=difficulty)
 
 
 @app.get("/api/claims/{claim_id}")
@@ -453,16 +951,241 @@ def get_claim(claim_id: str, _: dict = Depends(require_login)):
 
 
 @app.patch("/api/claims/{claim_id}")
-def update_claim(claim_id: str, payload: ClaimUpdate, _: dict = Depends(require_login)):
+def update_claim(claim_id: str, payload: ClaimUpdate, user: dict = Depends(require_login)):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    updates["changed_by"] = user.get("display_name") or user.get("username") or ""
     try:
         return store.update_claim(claim_id, updates)
     except ClaimNotFound:
         raise HTTPException(status_code=404, detail="클레임을 찾을 수 없습니다")
-    except InvalidTransition as e:
+    except (InvalidTransition, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.get("/api/claims/{claim_id}/history")
+def claim_history(claim_id: str, _: dict = Depends(require_login)):
+    try:
+        store.get_claim(claim_id)
+    except ClaimNotFound:
+        raise HTTPException(status_code=404, detail="클레임을 찾을 수 없습니다")
+    return store.list_claim_history(claim_id)
+
+
+@app.get("/api/claims/{claim_id}/recommendations")
+def claim_recommendations(claim_id: str, _: dict = Depends(require_login)):
+    try:
+        current = store.get_claim(claim_id)
+    except ClaimNotFound:
+        raise HTTPException(status_code=404, detail="클레임을 찾을 수 없습니다")
+    similar = store.find_similar_claims(claim_id)
+    manual_query = current.get("product") or current.get("category") or ""
+    manuals = store.list_manuals(q=manual_query)[:3] if manual_query else []
+    return {"similar_claims": similar, "manuals": manuals}
 
 
 @app.get("/api/stats/summary")
 def stats_summary(_: dict = Depends(require_login)):
     return store.stats_summary()
+
+
+@app.get("/api/stats/analytics")
+def stats_analytics(
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    customer_id: Optional[int] = None,
+    _: dict = Depends(require_login),
+):
+    """담당자별/처리유형별/난이도별/고객사별 실적 집계. SQLite·Postgres 어느 쪽이든
+    list_claims()가 반환하는 공통 dict 리스트 위에서 순수 Python으로 집계하므로
+    두 백엔드에 각각 SQL을 따로 둘 필요가 없다."""
+    claims = store.list_claims()
+    if customer_id:
+        claims = [c for c in claims if c.get("customer_id") == customer_id]
+    if from_date:
+        claims = [c for c in claims if c["created_at"][:10] >= from_date]
+    if to_date:
+        claims = [c for c in claims if c["created_at"][:10] <= to_date]
+
+    def avg(vals: list[float]) -> float:
+        vals = [v for v in vals if v]
+        return round(sum(vals) / len(vals), 1) if vals else 0.0
+
+    by_assignee: dict[str, dict[str, Any]] = {}
+    for c in claims:
+        name = c.get("assignee") or "미배정"
+        bucket = by_assignee.setdefault(
+            name,
+            {"received": 0, "in_progress": 0, "done": 0, "minutes": [], "by_difficulty": {"low": 0, "medium": 0, "high": 0}},
+        )
+        if c["status"] == "접수":
+            bucket["received"] += 1
+        elif c["status"] == "처리중":
+            bucket["in_progress"] += 1
+        elif c["status"] == "완료":
+            bucket["done"] += 1
+            if c.get("processing_minutes"):
+                bucket["minutes"].append(c["processing_minutes"])
+            if c.get("difficulty") in bucket["by_difficulty"]:
+                bucket["by_difficulty"][c["difficulty"]] += 1
+
+    by_assignee_out = []
+    for name, b in by_assignee.items():
+        total = b["received"] + b["in_progress"] + b["done"]
+        by_assignee_out.append({
+            "assignee": name,
+            "received": b["received"],
+            "in_progress": b["in_progress"],
+            "done": b["done"],
+            "completion_rate": round(b["done"] / total * 100, 1) if total else 0.0,
+            "avg_processing_minutes": avg(b["minutes"]),
+            "by_difficulty": b["by_difficulty"],
+        })
+    by_assignee_out.sort(key=lambda x: -x["done"])
+
+    by_processing_type: dict[str, int] = {}
+    for c in claims:
+        key = c.get("processing_type") or "미정"
+        by_processing_type[key] = by_processing_type.get(key, 0) + 1
+
+    difficulty_buckets: dict[str, dict[str, Any]] = {}
+    for c in claims:
+        if c["status"] != "완료":
+            continue
+        key = c.get("difficulty") or "미정"
+        d = difficulty_buckets.setdefault(key, {"count": 0, "minutes": []})
+        d["count"] += 1
+        if c.get("processing_minutes"):
+            d["minutes"].append(c["processing_minutes"])
+    by_difficulty = {k: {"count": v["count"], "avg_processing_minutes": avg(v["minutes"])} for k, v in difficulty_buckets.items()}
+
+    by_category: dict[str, int] = {}
+    for c in claims:
+        key = c.get("category") or "미분류"
+        by_category[key] = by_category.get(key, 0) + 1
+
+    customer_counts: dict[str, int] = {}
+    for c in claims:
+        key = c.get("customer") or "미상"
+        customer_counts[key] = customer_counts.get(key, 0) + 1
+    by_customer_top = [
+        {"customer": k, "count": v} for k, v in sorted(customer_counts.items(), key=lambda kv: -kv[1])[:10]
+    ]
+
+    # 최근 6개월 접수/완료 추이 (데이터가 없는 달도 0으로 채워 그래프가 끊기지 않게 한다)
+    today = datetime.now()
+    months: list[str] = []
+    y, m = today.year, today.month
+    for i in range(5, -1, -1):
+        mm, yy = m - i, y
+        while mm <= 0:
+            mm += 12
+            yy -= 1
+        months.append(f"{yy:04d}-{mm:02d}")
+    monthly = {mo: {"received": 0, "done": 0} for mo in months}
+    for c in claims:
+        mo = c["created_at"][:7]
+        if mo in monthly:
+            monthly[mo]["received"] += 1
+        if c["status"] == "완료" and c.get("completed_at"):
+            mo2 = c["completed_at"][:7]
+            if mo2 in monthly:
+                monthly[mo2]["done"] += 1
+    monthly_trend = [{"month": mo, **monthly[mo]} for mo in months]
+
+    return {
+        "by_assignee": by_assignee_out,
+        "by_processing_type": by_processing_type,
+        "by_difficulty": by_difficulty,
+        "by_category": by_category,
+        "by_customer_top": by_customer_top,
+        "monthly_trend": monthly_trend,
+    }
+
+
+@app.get("/api/stats/export.csv")
+def stats_export_csv(_: dict = Depends(require_login)):
+    claims = store.list_claims()
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "접수번호", "접수일시", "채널", "고객사", "제품", "유형", "상태", "담당자",
+        "처리유형", "난이도", "처리소요분(분)", "처리결과",
+    ])
+    for c in claims:
+        writer.writerow([
+            c.get("claim_id"), c.get("created_at"), c.get("channel"), c.get("customer"), c.get("product"),
+            c.get("category"), c.get("status"), c.get("assignee"), c.get("processing_type"),
+            c.get("difficulty"), c.get("processing_minutes"), c.get("resolution"),
+        ])
+    return Response(
+        content=output.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=claims_export.csv"},
+    )
+
+
+# ---------------------------------------------------------------------- #
+# 클레임 첨부파일 (이미지/영상)
+#
+# 저장 파일명은 업로드 원본 파일명을 그대로 쓰지 않고 uuid4로 새로 만든다 —
+# 원본 파일명에 경로 조작 문자(../ 등)가 섞여 있어도 디스크 경로에 영향을 주지
+# 않게 하기 위함. 원본 파일명은 메타데이터(표시용)로만 DB에 남긴다.
+async def _save_attachment(claim_id: str, file: UploadFile) -> dict[str, Any]:
+    """클레임 존재 확인부터 디스크 저장·DB 메타데이터 기록까지 — 내부/공개 업로드
+    엔드포인트가 공통으로 쓴다. 클레임 미존재는 ClaimNotFound를 그대로 전파한다."""
+    store.get_claim(claim_id)  # 없으면 ClaimNotFound
+
+    content_type = file.content_type or ""
+    if content_type not in ALLOWED_ATTACHMENT_TYPES:
+        raise HTTPException(status_code=400, detail=f"지원하지 않는 파일 형식입니다: {content_type or '알수없음'}")
+
+    content = await file.read()
+    if len(content) > MAX_ATTACHMENT_BYTES:
+        raise HTTPException(status_code=400, detail=f"파일 용량은 최대 {MAX_ATTACHMENT_BYTES // (1024 * 1024)}MB까지 가능합니다")
+
+    ext = Path(file.filename or "").suffix[:10]  # 확장자만 표시용으로 보존, 나머지는 uuid
+    stored_name = f"{uuid.uuid4().hex}{ext}"
+    attachment_storage.save(claim_id, stored_name, content, content_type)
+
+    return store.add_attachment(
+        claim_id=claim_id,
+        filename=file.filename or stored_name,
+        stored_name=stored_name,
+        content_type=content_type,
+        size_bytes=len(content),
+    )
+
+
+@app.post("/api/claims/{claim_id}/attachments")
+async def upload_attachment(claim_id: str, file: UploadFile = File(...), _: dict = Depends(require_login)):
+    try:
+        return await _save_attachment(claim_id, file)
+    except ClaimNotFound:
+        raise HTTPException(status_code=404, detail="클레임을 찾을 수 없습니다")
+
+
+@app.get("/api/claims/{claim_id}/attachments")
+def list_attachments(claim_id: str, _: dict = Depends(require_login)):
+    return store.list_attachments(claim_id)
+
+
+@app.get("/api/attachments/{attachment_id}/file")
+def get_attachment_file(attachment_id: int, _: dict = Depends(require_login)):
+    att = store.get_attachment(attachment_id)
+    if not att:
+        raise HTTPException(status_code=404, detail="첨부파일을 찾을 수 없습니다")
+    kind, value = attachment_storage.get_file_or_url(att["claim_id"], att["stored_name"])
+    if kind == "path":
+        if not Path(value).is_file():
+            raise HTTPException(status_code=404, detail="첨부파일이 서버에 남아있지 않습니다")
+        return FileResponse(value, media_type=att["content_type"] or None, filename=att["filename"])
+    return RedirectResponse(value)  # S3 등 외부 스토리지 — 서명된 다운로드 URL로 리다이렉트
+
+
+@app.delete("/api/attachments/{attachment_id}")
+def delete_attachment(attachment_id: int, _: dict = Depends(require_login)):
+    att = store.delete_attachment(attachment_id)
+    if not att:
+        raise HTTPException(status_code=404, detail="첨부파일을 찾을 수 없습니다")
+    attachment_storage.delete(att["claim_id"], att["stored_name"])
+    return {"ok": True}

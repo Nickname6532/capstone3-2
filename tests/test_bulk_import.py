@@ -99,3 +99,25 @@ def test_xlsx_row_shorter_than_header_does_not_crash():
 
     ok, dup, failed = bulk_import.import_rows("t.xlsx", buf.getvalue())
     assert len(ok) == 1
+
+
+def test_processing_detail_columns_are_mapped_and_normalized():
+    csv_bytes = (
+        "고객사,제품,내용,처리유형,난이도,방문시간,처리결과,소요시간,협력업체\n"
+        "가나전자,냉장고,문제,현장방문,상,2026-08-01 10:00,수리완료,45분,㈜서비스파트너\n"
+    ).encode("utf-8-sig")
+    ok, dup, failed = bulk_import.import_rows("t.csv", csv_bytes)
+    row = ok[0]
+    assert row["processing_type"] == "엔지니어방문"
+    assert row["difficulty"] == "high"
+    assert row["visit_time"] == "2026-08-01 10:00"
+    assert row["resolution"] == "수리완료"
+    assert row["processing_minutes"] == 45
+    assert row["partner_name"] == "㈜서비스파트너"
+
+
+def test_unknown_processing_type_dropped_with_warning():
+    csv_bytes = "고객사,제품,내용,처리유형\n가나전자,냉장고,문제,텔레포트\n".encode("utf-8-sig")
+    ok, dup, failed = bulk_import.import_rows("t.csv", csv_bytes)
+    assert "processing_type" not in ok[0]
+    assert any("처리유형" in w for w in ok[0]["_warnings"])
