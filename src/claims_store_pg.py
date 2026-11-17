@@ -224,12 +224,17 @@ class PgClaimsStore:
         self._lock = threading.Lock()
         self._conn: Optional[psycopg.Connection] = None
         self._ensure_conn()
+        # 서버리스는 콜드스타트가 동시에 여러 개 일어난다. 각자 ALTER TABLE을 실행하면
+        # 서로 락을 기다리며 deadlock이 나므로, advisory lock으로 한 번에 하나만 초기화한다.
         with self._conn.cursor() as cur:
-            cur.execute(_SCHEMA)
-            # 예전엔 난이도를 쉬움/보통/어려움(한글)으로 저장했다 — low/medium/high로 한 번만 옮긴다.
-            for old, new in (("쉬움", "low"), ("보통", "medium"), ("어려움", "high")):
-                cur.execute("UPDATE claims SET difficulty=%s WHERE difficulty=%s", (new, old))
-        self._conn.commit()
+            cur.execute("SELECT pg_advisory_lock(7351001)")
+            try:
+                cur.execute(_SCHEMA)
+                # 예전엔 난이도를 쉬움/보통/어려움(한글)으로 저장했다 — low/medium/high로 한 번만 옮긴다.
+                for old, new in (("쉬움", "low"), ("보통", "medium"), ("어려움", "high")):
+                    cur.execute("UPDATE claims SET difficulty=%s WHERE difficulty=%s", (new, old))
+            finally:
+                cur.execute("SELECT pg_advisory_unlock(7351001)")
 
     # ------------------------------------------------------------------ #
     def _ensure_conn(self) -> psycopg.Connection:
