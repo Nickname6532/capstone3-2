@@ -175,3 +175,11 @@ DATABASE_URL="postgresql://localhost:5432/claim_test" .venv/bin/uvicorn app:app 
 
 여러 담당자가 실제로 동시 사용하는 단계에서도 이 Postgres 백엔드를 그대로 쓰면 된다 — 상시 서버로
 옮기더라도 `DATABASE_URL`만 그대로 두면 코드 변경 없이 동작한다.
+
+## 라이선스 기반 테스트 클레임 데이터
+
+등록된 라이선스(활성/만료 임박/만료)에 맞는 문의를 만들어 연결합니다. 설명 앞에 `[테스트]`가 붙어 검색으로 구분됩니다.
+
+- 웹 화면에서 올리기: `sample_data/test_claims.csv`를 대시보드 "기존 데이터 가져오기 → 클레임 이력"에 업로드합니다 (VMware 라이선스 59건 기준, 서버리스 배포에서도 사용 가능).
+- DB에 직접 생성(라이선스가 먼저 있어야 함, 클레임이 고객사/제품/라이선스에 연결됨): `cd src && ../.venv/bin/python seed_claims.py`
+- CSV 다시 만들기: `cd src && ../.venv/bin/python seed_claims.py --from-file <라이선스.xlsx> --csv ../sample_data/test_claims.csv`
