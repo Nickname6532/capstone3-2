@@ -270,3 +270,40 @@ def test_list_claims_filters_by_difficulty(store):
     store.create_claim({"customer": "B", "product": "P", "description": "D", "difficulty": "high"})
     results = store.list_claims(difficulty="low")
     assert len(results) == 1 and results[0]["claim_id"] == low["claim_id"]
+
+
+def test_concurrent_reads_and_writes_do_not_corrupt_results(tmp_path):
+    """화면 하나가 API를 여러 개 동시에 부르는 상황: 공유 SQLite 연결에서 읽기/쓰기가 섞여도 오류가 없어야 한다."""
+    import threading
+
+    from claim_logger import ClaimLogger
+    from claims_store import ClaimsStore
+
+    store = ClaimsStore(base_dir=tmp_path / "data", logger=ClaimLogger(base_dir=tmp_path / "logs"))
+    for i in range(20):
+        store.create_claim({"customer": f"c{i}", "product": "P", "description": "D", "assignee": "a"})
+    errors: list[BaseException] = []
+
+    def reader():
+        try:
+            for _ in range(150):
+                rows = store.list_claims()
+                assert rows and all("claim_id" in r for r in rows)
+                store.list_customers()
+        except BaseException as e:  # noqa: BLE001
+            errors.append(e)
+
+    def writer(n):
+        try:
+            for i in range(25):
+                store.create_claim({"customer": f"w{n}-{i}", "product": "P", "description": "D", "assignee": "a"})
+        except BaseException as e:  # noqa: BLE001
+            errors.append(e)
+
+    threads = [threading.Thread(target=reader) for _ in range(6)] + [threading.Thread(target=writer, args=(n,)) for n in range(3)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert not errors, errors[:2]
+    assert len(store.list_claims()) == 20 + 3 * 25

@@ -259,6 +259,61 @@ class DuplicateClaim(ValueError):
         super().__init__(f"이미 등록된 클레임과 동일한 내용입니다 ({existing_claim_id})")
 
 
+class _Rows:
+    """미리 가져온 결과 행. sqlite3.Cursor 중 이 코드가 쓰는 부분(fetchone/fetchall/lastrowid/rowcount)만 흉내낸다."""
+
+    def __init__(self, rows, lastrowid, rowcount):
+        self._rows = rows
+        self._pos = 0
+        self.lastrowid = lastrowid
+        self.rowcount = rowcount
+
+    def fetchone(self):
+        if self._pos >= len(self._rows):
+            return None
+        row = self._rows[self._pos]
+        self._pos += 1
+        return row
+
+    def fetchall(self):
+        rows = self._rows[self._pos:]
+        self._pos = len(self._rows)
+        return rows
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+
+class _SerializedConnection:
+    """스레드 간에 공유되는 sqlite3 연결을 안전하게 쓰기 위한 래퍼.
+
+    execute와 결과 fetch를 하나의 락 안에서 끝내므로, 다른 스레드의 쿼리가 중간에 끼어들 수 없다.
+    """
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+        self._guard = threading.Lock()
+
+    def execute(self, sql, params=()):
+        with self._guard:
+            cur = self._conn.execute(sql, params)
+            rows = cur.fetchall() if cur.description is not None else []
+            return _Rows(rows, cur.lastrowid, cur.rowcount)
+
+    def executemany(self, sql, seq):
+        with self._guard:
+            cur = self._conn.executemany(sql, seq)
+            return _Rows([], cur.lastrowid, cur.rowcount)
+
+    def executescript(self, script):
+        with self._guard:
+            self._conn.executescript(script)
+
+    def commit(self):
+        with self._guard:
+            self._conn.commit()
+
+
 @dataclass
 class ClaimsStore:
     base_dir: Path = field(default_factory=lambda: Path("data"))
@@ -277,8 +332,11 @@ class ClaimsStore:
         legacy_csv = self.base_dir / "claims.csv"
         is_new_db = not self.path.exists()
 
-        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
+        raw_conn = sqlite3.connect(str(self.path), check_same_thread=False)
+        raw_conn.row_factory = sqlite3.Row
+        # 화면 하나가 API를 4~5개 동시에 부르는데, 연결 하나를 락 없이 공유하면 드물게
+        # "tuple index out of range" 같은 500이 난다. execute~fetch를 한 덩어리로 직렬화한다.
+        self._conn = _SerializedConnection(raw_conn)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
         self._migrate_columns()
