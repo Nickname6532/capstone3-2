@@ -4,32 +4,25 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>라이선스관리</title>
-<link rel="stylesheet" href="/static/style.css?v=16" />
+<link rel="stylesheet" href="/static/style.css?v=17" />
 </head>
 <body>
 <header class="page-head">
-  <div>
-    <p class="eyebrow">BOARD 03 · LICENSES</p>
-    <h1>라이선스관리</h1>
-    <p class="sub">고객사 · 제품 · 라이선스를 한 곳에서 등록하고 검색·정렬합니다</p>
-  </div>
-  <div id="user-box" class="user-box"></div>
+  <h1>라이선스관리</h1>
 </header>
 
 <main>
   <!-- ============ 단일 입력창 등록 ============ -->
-  <section class="panel">
-    <div class="panel-head">
-      <h2>등록</h2>
-      <p class="hint">고객사만 · 고객사+제품 · 고객사+제품+라이선스 중 필요한 범위만 선택해 등록합니다</p>
-    </div>
+  <details class="fold" id="reg-fold">
+    <summary>고객사·제품·라이선스 등록</summary>
+    <p class="hint fold-note">고객사만, 고객사와 제품, 고객사와 제품과 라이선스 중 필요한 범위만 골라 등록합니다.</p>
     <form id="reg-form" novalidate>
       <div class="reg-level" id="reg-level" role="radiogroup" aria-label="등록 범위">
         <label class="on"><input type="radio" name="reg-level" value="1" checked /> 고객사만</label>
         <label><input type="radio" name="reg-level" value="2" /> 고객사 + 제품</label>
         <label><input type="radio" name="reg-level" value="3" /> 고객사 + 제품 + 라이선스</label>
       </div>
-      <p class="hint req-note"><span class="req">*</span> 표시는 필수 입력입니다 · 이미 있는 고객사/제품 이름을 입력하면 <b>추가 등록</b>, 없으면 <b>신규 등록</b>됩니다</p>
+      <p class="req-note"><span class="req">*</span> 표시는 필수 입력입니다. 이미 있는 고객사나 제품 이름을 입력하면 <b>추가 등록</b>, 없으면 <b>신규 등록</b>됩니다.</p>
 
       <div class="row">
         <label>고객사명(사이트명) <span class="req">*</span> <span id="reg-customer-mode"></span>
@@ -86,21 +79,21 @@
       <p id="reg-error" class="form-error" role="alert" hidden></p>
       <button type="submit" class="primary" id="reg-submit">고객사 등록</button>
     </form>
-    <p id="reg-result" style="font-size:13px; margin-top:10px;"></p>
-  </section>
+    <p id="reg-result" class="result-line"></p>
+  </details>
 
   <!-- ============ 라이선스 목록 (검색·필터·정렬, 처음엔 접힘) ============ -->
   <section class="panel">
     <div class="panel-head">
       <h2>라이선스 목록</h2>
-      <p class="hint"><a href="/api/licenses/export.xlsx">엑셀 내보내기(가져오기와 같은 양식) ↓</a></p>
+      <p class="hint"><a href="/api/licenses/export.xlsx">엑셀로 내보내기</a> (가져오기와 같은 양식)</p>
     </div>
-    <div class="list-toolbar">
+    <div class="list-toolbar toolbar">
       <label>검색 <input id="lic-q" placeholder="사이트명 / 제품 / 라이선스 키" /></label>
       <label>구분 <select id="lic-f-category"><option value="">전체</option></select></label>
       <label>상태
         <select id="lic-f-status">
-          <option value="">전체</option><option>활성</option><option>만료 임박</option><option>만료</option>
+          <option value="">전체</option><option value="구독중">활성</option><option value="만료임박">만료 임박</option><option value="만료">만료</option>
         </select>
       </label>
       <label>제품 <select id="lic-f-product"><option value="">전체</option></select></label>
@@ -122,27 +115,25 @@
   </section>
 
   <!-- ============ 라이선스 일괄 가져오기 ============ -->
-  <section class="panel">
-    <div class="panel-head">
-      <h2>라이선스 일괄 가져오기</h2>
-      <p class="hint">엑셀(.xlsx)/CSV — "사이트명/라이선스 키/구분/구독기간(년)/시작일/만료일" 등 헤더 자동 인식</p>
-    </div>
+  <details class="fold" id="import-fold">
+    <summary>라이선스 일괄 가져오기</summary>
+    <p class="hint fold-note">엑셀(.xlsx)이나 CSV를 올리면 사이트명, 라이선스 키, 구분, 구독기간, 시작일, 만료일 헤더를 자동으로 인식합니다.</p>
     <div class="row">
       <label>파일 선택 <input id="license-import-file" type="file" accept=".csv,.xlsx" /></label>
       <label>제품명이 없는 행의 기본값 <input id="license-import-product" placeholder="예: VMware" /></label>
-      <div style="display:flex; align-items:flex-end; gap:8px;">
+      <div class="row-action">
         <button id="license-import-dry-run-btn" type="button">미리보기</button>
         <button id="license-import-btn" type="button" class="primary">가져오기</button>
       </div>
     </div>
     <div id="license-import-result"></div>
-  </section>
+  </details>
 
   <!-- ============ 사이트별 요약 / 고객사 / 제품 (필요할 때만 펼침) ============ -->
   <section class="panel">
     <details>
-      <summary><strong>사이트별 요약</strong> <span class="hint">(눌러서 펼치기)</span></summary>
-      <div class="table-scroll" style="margin-top:12px;">
+      <summary>사이트별 요약</summary>
+      <div class="table-scroll">
         <table>
           <thead><tr><th>사이트명</th><th>구분</th><th>라이선스 수</th><th>활성</th><th>만료 임박</th><th>만료</th><th>1년</th><th>3년</th><th>5년</th></tr></thead>
           <tbody id="site-summary-body"></tbody>
@@ -161,8 +152,8 @@
 
   <section class="panel">
     <details>
-      <summary><strong>고객사 목록</strong> <span class="hint" id="customers-count"></span></summary>
-      <div class="list-toolbar" style="margin-top:12px;">
+      <summary>고객사 목록 <span class="count" id="customers-count"></span></summary>
+      <div class="list-toolbar toolbar">
         <label>검색 <input id="cust-q" placeholder="고객사명 / 구분" /></label>
       </div>
       <div class="table-scroll">
@@ -176,8 +167,8 @@
 
   <section class="panel">
     <details>
-      <summary><strong>제품 목록</strong> <span class="hint" id="products-count"></span></summary>
-      <div class="list-toolbar" style="margin-top:12px;">
+      <summary>제품 목록 <span class="count" id="products-count"></span></summary>
+      <div class="list-toolbar toolbar">
         <label>검색 <input id="prod-q" placeholder="고객사 / 제품명" /></label>
       </div>
       <div class="table-scroll">
@@ -221,7 +212,7 @@
   </div>
 </div>
 
-<script src="/static/common.js?v=1"></script>
+<script src="/static/common.js?v=2"></script>
 <script>
   let customers = [];
   let products = [];
@@ -230,7 +221,7 @@
   const $ = (id) => document.getElementById(id);
   const norm = (s) => String(s || "").trim().toLowerCase();
   const NOTIFY_TARGET_LABELS = { both: "담당자+고객", staff: "담당자만", customer: "고객만", none: "끔" };
-  const STATUS_RANK = { "만료": 0, "만료 임박": 1, "활성": 2 };
+  const STATUS_RANK = { "만료": 0, "만료임박": 1, "만료 임박": 1, "구독중": 2, "활성": 2 };
 
   async function jsonOrEmpty(res) { return res.json().catch(() => ({})); }
   function errText(err, fallback) {
@@ -354,8 +345,8 @@
     parts.push(`고객사 ${data.created.customer ? "신규 등록" : "추가 등록(기존)"}`);
     if (data.product) parts.push(`제품 ${data.created.product ? "신규 등록" : "기존 사용"}`);
     if (data.license) parts.push("라이선스 등록");
-    result.textContent = `완료: ${data.customer.name} — ${parts.join(" · ")}`;
-    result.style.color = "var(--moss)";
+    result.textContent = `등록했습니다. ${data.customer.name}: ${parts.join(", ")}`;
+    result.style.color = "var(--ok-ink)";
     const keepLevel = regForm.querySelector(`input[name='reg-level'][value='${lv}']`);
     regForm.reset();
     keepLevel.checked = true;
@@ -518,7 +509,7 @@
     const lic = licenses.find(l => l.id === id);
     if (!lic) return;
     editingLicenseId = id;
-    $("lic-modal-title").textContent = `라이선스 수정 · ${lic.customer_name} / ${lic.product_name}`;
+    $("lic-modal-title").textContent = `라이선스 수정: ${lic.customer_name} / ${lic.product_name}`;
     $("lm-start").value = lic.start_date || "";
     $("lm-end").value = lic.end_date || "";
     $("lm-warning").value = lic.warning_days || 30;
@@ -557,7 +548,7 @@
   function renderCustomers() {
     const q = norm($("cust-q").value);
     const list = customers.filter(c => !q || norm(c.name).includes(q) || norm(c.category).includes(q));
-    $("customers-count").textContent = `(${customers.length}곳 — 눌러서 펼치기)`;
+    $("customers-count").textContent = `${customers.length}곳`;
     $("reg-customer-list").innerHTML = customers.map(c => `<option value="${escapeHtml(c.name)}">`).join("");
     $("customers-body").innerHTML = list.map(c => `
       <tr data-id="${c.id}">
@@ -598,7 +589,7 @@
   function renderProducts() {
     const q = norm($("prod-q").value);
     const list = products.filter(p => !q || norm(p.name).includes(q) || norm(customerName(p.customer_id)).includes(q));
-    $("products-count").textContent = `(${products.length}개 — 눌러서 펼치기)`;
+    $("products-count").textContent = `${products.length}개`;
     $("products-body").innerHTML = list.map(p => `
       <tr data-id="${p.id}">
         <td>${escapeHtml(customerName(p.customer_id))}</td><td>${escapeHtml(p.name)}</td>
@@ -632,7 +623,7 @@
     const overview = await apiFetch(`/api/customers/${customerId}/overview`).then(r => r.json());
     $("overview-title").textContent = `${overview.customer.name} 상세`;
     $("overview-body").innerHTML = `
-      <p class="hint">보유 제품 ${overview.products.length}개 · 라이선스 ${overview.licenses.length}건 · 클레임 ${overview.claim_count}건</p>
+      <p class="hint">보유 제품 ${overview.products.length}개, 라이선스 ${overview.licenses.length}건, 클레임 ${overview.claim_count}건</p>
       <div class="table-scroll"><table>
         <thead><tr><th>제품</th><th>플랜</th><th>만료일</th><th>상태</th></tr></thead>
         <tbody>${overview.licenses.map(l => `
@@ -640,10 +631,10 @@
           <td class="num">${escapeHtml(l.end_date)}</td><td><span class="status-word lic-${l.status}">${l.status}</span></td></tr>`).join("")
           || `<tr><td colspan="4" class="hint">등록된 라이선스가 없습니다.</td></tr>`}</tbody>
       </table></div>
-      <div class="table-scroll"><table style="margin-top:12px;">
+      <div class="table-scroll"><table>
         <thead><tr><th>최근 클레임</th><th>상태</th><th>접수일</th></tr></thead>
         <tbody>${overview.claims.slice(0, 10).map(c => `
-          <tr><td>${escapeHtml(c.claim_id)} · ${escapeHtml(c.product)}</td>
+          <tr><td>${escapeHtml(c.claim_id)} / ${escapeHtml(c.product)}</td>
           <td><span class="status-word s-${c.status}">${c.status}</span></td><td class="num">${escapeHtml(c.created_at)}</td></tr>`).join("")
           || `<tr><td colspan="3" class="hint">클레임 이력이 없습니다.</td></tr>`}</tbody>
       </table></div>`;
@@ -695,7 +686,7 @@
     try {
       const res = await apiFetch(`/api/licenses/import?${params.toString()}`, { method: "POST", body: fd });
       const data = await res.json();
-      if (!res.ok) { resultEl.innerHTML = `<p style="color: var(--coral);">가져오기 실패: ${escapeHtml(data.detail || res.status)}</p>`; return; }
+      if (!res.ok) { resultEl.innerHTML = `<p style="color: var(--danger);">가져오기 실패: ${escapeHtml(data.detail || res.status)}</p>`; return; }
       let html = data.dry_run
         ? `<p><strong>미리보기</strong> — 등록 예정 ${data.preview_rows.length}건 / 실패 ${data.failed_count}건</p>`
         : `<p><strong>${data.imported_count}건</strong> 등록됨 / 총 ${data.total_rows}건 중 라이선스 키 중복 ${data.duplicate_count}건 제외, 실패 ${data.failed_count}건</p>`;
@@ -707,17 +698,17 @@
           "</tbody></table></div>";
       }
       if (data.failed_rows && data.failed_rows.length) {
-        html += "<p style='font-size:13px; color: var(--coral); margin-bottom:2px;'>실패</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
+        html += "<p style='font-size:13px; color: var(--danger); margin-bottom:2px;'>실패</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
           data.failed_rows.map(f => `<li>${f.row ? f.row + "행: " : ""}${escapeHtml(f.reason)}</li>`).join("") + "</ul>";
       }
       if (data.duplicate_rows && data.duplicate_rows.length) {
-        html += "<p style='font-size:13px; color: var(--warn); margin-bottom:2px;'>중복 라이선스 키 (건너뜀)</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
+        html += "<p style='font-size:13px; color: var(--warn-ink); margin-bottom:2px;'>중복 라이선스 키 (건너뜀)</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
           data.duplicate_rows.map(d => `<li>${escapeHtml(d.license_key)} — ${escapeHtml(d.reason)}</li>`).join("") + "</ul>";
       }
       resultEl.innerHTML = html;
       if (!dryRun) { fileInput.value = ""; await reloadAll(); }
     } catch (err) {
-      resultEl.innerHTML = `<p style="color: var(--coral);">네트워크 오류로 가져오기에 실패했습니다.</p>`;
+      resultEl.innerHTML = `<p style="color: var(--danger);">네트워크 오류로 가져오기에 실패했습니다.</p>`;
     } finally {
       dryRunBtn.disabled = false; importBtn.disabled = false;
     }

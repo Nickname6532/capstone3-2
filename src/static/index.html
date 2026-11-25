@@ -4,40 +4,35 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>대시보드</title>
-<link rel="stylesheet" href="/static/style.css?v=16" />
+<link rel="stylesheet" href="/static/style.css?v=17" />
 </head>
 <body>
 <header class="page-head">
-  <div>
-    <p class="eyebrow">BOARD 01 · OVERVIEW</p>
-    <h1>대시보드</h1>
-    <p class="sub">라이선스 만료 임박 · 처리 현황 · 담당자별 실적</p>
-  </div>
-  <div id="user-box" class="user-box"></div>
+  <h1>대시보드</h1>
+  <section class="board" id="stats" aria-label="클레임 처리 현황"></section>
 </header>
 
 <main>
   <section class="panel alert-board" id="license-alert">
     <div class="panel-head">
-      <h2>라이선스 만료 임박</h2>
-      <p class="hint"><a href="/licenses">라이선스 관리 →</a></p>
+      <h2>만기 타임라인</h2>
+      <p class="hint"><a href="/licenses">라이선스관리로 이동</a></p>
     </div>
+    <div id="license-timeline" class="timeline"></div>
     <div id="license-alert-body"><p class="alert-empty">불러오는 중...</p></div>
   </section>
-
-  <section class="board" id="stats"></section>
 
   <section class="panel">
     <div class="panel-head">
       <h2>담당자별 실적</h2>
-      <p class="hint"><a href="/api/stats/export.csv">CSV 내보내기 ↓</a></p>
+      <p class="hint"><a href="/api/stats/export.csv">CSV 내보내기</a></p>
     </div>
     <div id="analytics-body"></div>
   </section>
 
 </main>
 
-<script src="/static/common.js?v=1"></script>
-<script src="/static/dashboard.js?v=1"></script>
+<script src="/static/common.js?v=2"></script>
+<script src="/static/dashboard.js?v=2"></script>
 </body>
 </html>

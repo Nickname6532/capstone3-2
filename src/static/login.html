@@ -4,23 +4,21 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>로그인</title>
-<link rel="stylesheet" href="/static/style.css?v=16" />
+<link rel="stylesheet" href="/static/style.css?v=17" />
 <style>
   body { display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 24px 0; }
-  .login-box { width: 100%; max-width: 400px; padding: 0 16px; animation: rise 0.5s both; }
-  .login-box .eyebrow { margin-bottom: 14px; }
-  .login-box h1 { font-size: 30px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.15; margin: 0 0 6px; }
-  .login-box .sub { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
-  .login-box .panel { border-top: 4px solid var(--amber-hi); }
-  .login-box button.primary { width: 100%; margin-top: 6px; padding: 12px; }
-  .error-msg { color: var(--coral); font-size: 14px; font-weight: 600; margin: 0 0 14px; padding: 10px 14px; background: var(--coral-dim); border-left: 4px solid var(--coral-hi); display: none; }
+  .login-box { width: 100%; max-width: 400px; padding: 0 16px; }
+  .login-box h1 { font-size: 24px; font-weight: 700; line-height: 1.25; margin: 0 0 6px; }
+  .login-box .sub { color: var(--muted); font-size: 15px; margin: 0 0 24px; }
+  .login-box .panel { margin: 0; padding: 24px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; }
+  .login-box button.primary { width: 100%; margin-top: 8px; }
+  .error-msg { color: var(--danger-ink); font-size: 14px; font-weight: 500; margin: 0 0 16px; padding: 10px 12px; background: var(--danger-tint); border-left: 3px solid var(--danger); border-radius: 0 4px 4px 0; display: none; }
 </style>
 </head>
 <body>
 <div class="login-box">
-  <p class="eyebrow">DISPATCH CONSOLE · SIGN IN</p>
   <h1>클레임 통합관리 시스템</h1>
-  <p class="sub">담당자 계정으로 로그인하세요</p>
+  <p class="sub">담당자 계정으로 로그인하세요.</p>
   <div class="panel">
     <p class="error-msg" id="error-msg"></p>
     <form id="login-form">

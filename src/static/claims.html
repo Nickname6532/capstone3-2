@@ -4,28 +4,20 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>장애이력관리</title>
-<link rel="stylesheet" href="/static/style.css?v=16" />
+<link rel="stylesheet" href="/static/style.css?v=17" />
 </head>
 <body>
 <header class="page-head">
-  <div>
-    <p class="eyebrow">BOARD 02 · INCIDENTS</p>
-    <h1>장애이력관리</h1>
-    <p class="sub">접수 → 처리중 → 완료 · 기간/조건으로 이력 검색</p>
-  </div>
-  <div id="user-box" class="user-box"></div>
+  <h1>장애이력관리</h1>
+  <section class="board" id="stats" aria-label="클레임 처리 현황"></section>
 </header>
 
 <main>
-  <section class="board" id="stats"></section>
-
-  <section class="panel">
-    <div class="panel-head">
-      <h2>내부 접수</h2>
-      <p class="hint">고객 직접 접수: <a href="/submit" target="_blank">/submit</a></p>
-    </div>
+  <details class="fold" id="claim-intake">
+    <summary>새 장애 접수 등록</summary>
+    <p class="hint fold-note">고객이 직접 접수하는 화면은 <a href="/submit" target="_blank" rel="noopener">고객 접수 화면</a>입니다.</p>
     <form id="claim-form" novalidate>
-      <p class="hint req-note"><span class="req">*</span> 표시는 필수 입력입니다</p>
+      <p class="req-note"><span class="req">*</span> 표시는 필수 입력입니다.</p>
       <div class="row">
         <label>고객사 <span class="req">*</span> <input name="customer" required list="customer-suggestions" /></label>
         <label>연락처 <input name="contact" id="internal-contact-input" placeholder="010-0000-0000" inputmode="numeric" /></label>
@@ -73,33 +65,14 @@
       <p id="claim-form-error" class="form-error" role="alert" hidden></p>
       <button type="submit" class="primary">접수 등록</button>
     </form>
-  </section>
+  </details>
 
-  <section class="panel">
+  <section class="panel list-panel">
     <div class="panel-head">
-      <h2>기존 데이터 가져오기</h2>
-      <p class="hint">엑셀(.xlsx)/CSV 이력을 한 번에 등록 — "고객사/제품/내용/상태/담당자/접수일" 헤더 자동 인식</p>
+      <h2>장애 이력 목록</h2>
+      <p class="hint" id="claims-count"></p>
     </div>
-    <div class="row">
-      <label>가져올 데이터 종류
-        <select id="import-kind">
-          <option value="claims">클레임 이력</option>
-          <option value="licenses">라이선스(사이트별) — 사이트명/라이선스 키/구분/구독기간/시작일/만료일</option>
-        </select>
-      </label>
-      <label id="import-product-label" hidden>제품명 기본값 <input id="import-product" value="VMware" placeholder="예: VMware" /></label>
-      <label>파일 선택 <input id="import-file" type="file" accept=".csv,.xlsx" /></label>
-      <div style="display:flex; align-items:flex-end;">
-        <button id="import-btn" type="button">가져오기</button>
-      </div>
-    </div>
-    <div id="import-result"></div>
-  </section>
-
-  <section class="panel">
-    <h2>장애 이력 목록</h2>
-    <p class="hint" id="claims-count"></p>
-    <div class="filters">
+    <div class="filters toolbar">
       <label>상태
         <select id="filter-status">
           <option value="">전체</option>
@@ -147,6 +120,25 @@
       </table>
     </div>
   </section>
+
+  <details class="fold" id="claim-import">
+    <summary>기존 데이터 가져오기</summary>
+    <p class="hint fold-note">엑셀(.xlsx)이나 CSV 이력을 한 번에 등록합니다. 고객사, 제품, 내용, 상태, 담당자, 접수일 헤더를 자동으로 인식합니다.</p>
+    <div class="row">
+      <label>가져올 데이터 종류
+        <select id="import-kind">
+          <option value="claims">클레임 이력</option>
+          <option value="licenses">라이선스(사이트별) — 사이트명/라이선스 키/구분/구독기간/시작일/만료일</option>
+        </select>
+      </label>
+      <label id="import-product-label" hidden>제품명 기본값 <input id="import-product" value="VMware" placeholder="예: VMware" /></label>
+      <label>파일 선택 <input id="import-file" type="file" accept=".csv,.xlsx" /></label>
+      <div class="row-action">
+        <button id="import-btn" type="button">가져오기</button>
+      </div>
+    </div>
+    <div id="import-result"></div>
+  </details>
 </main>
 
 <datalist id="sub-status-suggestions">
@@ -164,7 +156,7 @@
   <div class="modal panel">
     <div class="panel-head">
       <h2 id="detail-modal-title">클레임 상세</h2>
-      <div style="display:flex; gap:8px;">
+      <div class="head-actions">
         <button type="button" id="detail-reopen-btn" hidden>재오픈</button>
         <button type="button" id="detail-modal-close">닫기</button>
       </div>
@@ -212,7 +204,7 @@
       <ul id="detail-attachments" class="attach-list"></ul>
       <div class="row">
         <label>파일 추가 <input type="file" id="detail-file-input" accept="image/jpeg,image/png,image/gif,image/webp,video/mp4,video/webm,video/quicktime" /></label>
-        <div style="display:flex; align-items:flex-end;">
+        <div class="row-action">
           <button type="button" id="detail-upload-btn">업로드</button>
         </div>
       </div>
@@ -225,14 +217,14 @@
     </div>
 
     <div class="attach-section">
-      <h3>유사 사례 · 매뉴얼 추천</h3>
+      <h3>유사 사례와 매뉴얼 추천</h3>
       <div id="detail-recommendations"></div>
     </div>
   </div>
 </div>
 
-<script src="/static/common.js?v=1"></script>
+<script src="/static/common.js?v=2"></script>
 <script src="/static/phone-format.js?v=2"></script>
-<script src="/static/app.js?v=13"></script>
+<script src="/static/app.js?v=14"></script>
 </body>
 </html>

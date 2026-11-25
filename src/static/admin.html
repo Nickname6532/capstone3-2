@@ -4,20 +4,18 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>계정 관리</title>
-<link rel="stylesheet" href="/static/style.css?v=16" />
+<link rel="stylesheet" href="/static/style.css?v=17" />
 </head>
 <body>
-<header>
-  <p class="eyebrow">SYS · ACCESS</p>
+<header class="page-head">
   <h1>계정 관리</h1>
-  <p class="sub"><a href="/">← 현황판으로</a></p>
 </header>
 
 <main>
   <section class="panel">
     <div class="panel-head">
       <h2>새 계정 만들기</h2>
-      <p class="hint">아이디는 영문/숫자/._ 3~32자, 비밀번호는 10자 이상(숫자+문자 혼합)</p>
+      <p class="hint">아이디는 영문, 숫자, ., _ 로 3~32자. 비밀번호는 숫자와 문자를 섞어 10자 이상.</p>
     </div>
     <form id="create-form">
       <div class="row">
@@ -35,7 +33,7 @@
       </div>
       <button type="submit" class="primary">계정 생성</button>
     </form>
-    <p id="create-result" style="font-size: 13px; margin-top: 10px;"></p>
+    <p id="create-result" class="result-line"></p>
   </section>
 
   <section class="panel">
@@ -51,7 +49,7 @@
   </section>
 </main>
 
-<script src="/static/common.js?v=1"></script>
+<script src="/static/common.js?v=2"></script>
 <script>
   function escapeHtml(str) {
     const div = document.createElement("div");
@@ -76,7 +74,7 @@
         <td class="num">${escapeHtml(a.username)}</td>
         <td>${escapeHtml(a.display_name || "-")}</td>
         <td>${escapeHtml(a.role)}</td>
-        <td>${a.is_active ? "활성" : "비활성"}${a.locked_until ? " · 잠김" : ""}</td>
+        <td>${a.is_active ? "활성" : "비활성"}${a.locked_until ? ", 잠김" : ""}</td>
         <td class="num">${escapeHtml(a.created_at)}</td>
         <td class="num">${escapeHtml(a.last_login_at || "-")}</td>
         <td class="actions">
@@ -140,12 +138,12 @@
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
       resultEl.textContent = err.detail || "생성 실패";
-      resultEl.style.color = "var(--coral)";
+      resultEl.style.color = "var(--danger)";
       return;
     }
     const account = await res.json();
     resultEl.textContent = `${account.username} 계정이 생성되었습니다.`;
-    resultEl.style.color = "var(--moss)";
+    resultEl.style.color = "var(--ok-ink)";
     form.reset();
     await loadAccounts();
   });

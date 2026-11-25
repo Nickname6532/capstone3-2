@@ -4,96 +4,36 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>클레임 접수</title>
-<link rel="stylesheet" href="/static/style.css?v=16" />
+<link rel="stylesheet" href="/static/style.css?v=17" />
 <style>
-  main.narrow { max-width: 480px; }
-
-  .lede {
-    margin: 0 0 20px;
-    font-size: 15px;
-    color: var(--muted);
-    line-height: 1.6;
-  }
-
+  main.narrow { max-width: 520px; }
+  .lede { margin: 0 0 20px; color: var(--muted); line-height: 1.6; }
+  main.narrow .panel { padding: 24px; background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; margin-top: 0; }
+  main.narrow .panel + .panel { margin-top: 16px; }
   .success { display: none; }
 
-  .ticket {
-    position: relative;
-    background: var(--surface);
-    border: 1px solid var(--line-strong);
-    border-top: 4px solid var(--amber-hi);
-    padding: 0;
-  }
-  .ticket .perf { position: relative; }
-  .ticket .perf::before, .ticket .perf::after {
-    content: ""; position: absolute; top: -11px; width: 22px; height: 22px; border-radius: 50%;
-    background: var(--ink); border: 1px solid var(--line-strong);
-  }
-  .ticket .perf::before { left: -12px; }
-  .ticket .perf::after { right: -12px; }
-
-  .ticket-top {
-    padding: 28px 24px 22px;
-    text-align: center;
-  }
-
-  .ticket-top .ok {
-    font-size: 12px;
-    color: var(--moss);
-    font-weight: 500;
-    margin: 0 0 6px;
-  }
-
-  .ticket-top h2 {
-    margin: 0;
-    font-size: 18px;
-    font-weight: 600;
-  }
-
-  .perf {
-    height: 1px;
-    background-image: repeating-linear-gradient(
-      to right, var(--line) 0, var(--line) 6px, transparent 6px, transparent 12px
-    );
-  }
-
-  .ticket-number {
-    padding: 26px 24px 30px;
-    text-align: center;
-  }
-
-  .ticket-number .label {
-    font-size: 11.5px;
-    color: var(--muted);
-    margin: 0 0 8px;
-  }
-
-  .ticket-number .id {
-    font-family: var(--font-num);
-    font-size: 30px;
-    font-weight: 700;
-    color: var(--amber);
-    letter-spacing: 0.02em;
-    word-break: break-all;
-  }
-
-  .ticket-foot {
-    margin: 16px 0 0;
-    font-size: 12.5px;
-    color: var(--muted);
-  }
+  .ticket { background: var(--surface); border: 1px solid var(--rule); border-radius: 8px; border-left: 4px solid var(--ok); }
+  .ticket-top { padding: 24px 24px 18px; }
+  .ticket-top .ok { font-size: 14px; color: var(--ok-ink); font-weight: 700; margin: 0 0 4px; }
+  .ticket-top h2 { margin: 0; font-size: 18px; font-weight: 700; }
+  .perf { height: 0; border-top: 1px dashed var(--rule-strong); margin: 0 24px; }
+  .ticket-number { padding: 18px 24px 24px; }
+  .ticket-number .label { font-size: 13.5px; color: var(--muted); margin: 0 0 4px; }
+  .ticket-number .id { font-size: 28px; font-weight: 700; color: var(--primary); font-variant-numeric: tabular-nums; word-break: break-all; margin: 0; }
+  .ticket-foot { margin: 16px 0 0; font-size: 14px; color: var(--muted); }
 
   .tab-panel[hidden] { display: none; }
-
-  .track-status { padding: 4px 0; }
-  .track-status .value { font-weight: 600; }
+  .track-status { padding: 6px 0; border-bottom: 1px solid var(--rule); }
+  .track-status .value { font-weight: 700; }
+  #track-error { color: var(--danger-ink); font-size: 14px; margin: 12px 0 0; }
+  #track-result { margin-top: 16px; }
+  .sub-block { margin-top: 16px; }
 </style>
 </head>
 <body>
-<header>
-  <p class="eyebrow">CUSTOMER DESK · 접수</p>
+<header class="public-head">
   <h1>클레임 접수</h1>
-  <p class="sub">문제를 알려주시면 담당자가 확인합니다</p>
+  <p class="sub">문제를 알려주시면 담당자가 확인합니다.</p>
 </header>
 
 <main class="narrow">
@@ -143,26 +83,26 @@
         <label>연락처 <input name="contact" required placeholder="010-0000-0000 또는 뒤 4자리" inputmode="numeric" /></label>
         <button type="submit" class="primary">조회하기</button>
       </form>
-      <p id="track-error" style="color: var(--coral); font-size: 13px; margin: 10px 0 0;"></p>
+      <p id="track-error" role="alert"></p>
     </div>
 
-    <div class="panel" id="track-result" style="margin-top: 14px; display: none;">
-      <div class="track-status"><span>상태</span> · <span class="value" id="track-status-value"></span></div>
-      <div class="track-status"><span>담당자 배정</span> · <span class="value" id="track-assigned-value"></span></div>
-      <div class="track-status" id="track-visit-row" style="display:none;"><span>방문 예정</span> · <span class="value" id="track-visit-value"></span></div>
+    <div class="panel" id="track-result" style="display: none;">
+      <div class="track-status"><span>상태</span> <span class="value" id="track-status-value"></span></div>
+      <div class="track-status"><span>담당자 배정</span> <span class="value" id="track-assigned-value"></span></div>
+      <div class="track-status" id="track-visit-row" style="display:none;"><span>방문 예정</span> <span class="value" id="track-visit-value"></span></div>
       <div class="track-status" id="track-resolution-row" style="display:none;"><span>처리 결과</span><br><span id="track-resolution-value"></span></div>
 
-      <div style="margin-top:14px;">
-        <p class="hint" style="margin-bottom:6px;">첨부파일</p>
+      <div class="sub-block">
+        <p class="hint">첨부파일</p>
         <ul id="track-attachments" class="attach-list"></ul>
       </div>
 
-      <div style="margin-top:14px;">
-        <p class="hint" style="margin-bottom:6px;">추가 문의/보충 설명</p>
-        <ul id="track-notes" class="history-list" style="margin-bottom:10px;"></ul>
+      <div class="sub-block">
+        <p class="hint">추가 문의/보충 설명</p>
+        <ul id="track-notes" class="history-list"></ul>
         <form id="track-note-form">
           <textarea name="body" rows="2" placeholder="추가로 전달하실 내용을 적어주세요"></textarea>
-          <button type="submit" style="margin-top:8px;">등록</button>
+          <button type="submit" class="note-submit">등록</button>
         </form>
         <p class="hint" id="track-note-closed" style="display:none;">완료된 클레임에는 추가 등록이 불가합니다.</p>
       </div>

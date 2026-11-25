@@ -18,9 +18,10 @@ async function apiFetch(url, options) {
 async function loadUser() {
   const res = await apiFetch("/api/auth/me");
   const me = await res.json();
-  const adminLink = me.role === "admin" ? ` · <a href="/admin">계정 관리</a>` : "";
+  const adminLink = me.role === "admin" ? `<a href="/admin">계정 관리</a>` : "";
   document.getElementById("user-box").innerHTML =
-    `${escapeHtml(me.display_name)}님 (${escapeHtml(me.role)})${adminLink} · <a href="#" id="logout-link">로그아웃</a>`;
+    `<span class="user-name">${escapeHtml(me.display_name)}</span><span class="user-role">${escapeHtml(me.role)}</span>` +
+    `${adminLink}<a href="#" id="logout-link">로그아웃</a>`;
   document.getElementById("logout-link").addEventListener("click", async (e) => {
     e.preventDefault();
     await fetch("/api/auth/logout", { method: "POST" });
@@ -35,31 +36,32 @@ async function loadStats() {
   const s = await res.json();
   const channelLine = Object.entries(s.channel_breakdown || {})
     .map(([ch, n]) => `${ch} ${n}`)
-    .join(" · ");
+    .join(", ");
   statsEl.innerHTML = `
     <div class="board-seg"><span class="label"><span class="dot 접수"></span>접수</span><span class="value num">${s.received}</span></div>
     <div class="board-seg"><span class="label"><span class="dot 처리중"></span>처리중</span><span class="value num">${s.in_progress}</span></div>
     <div class="board-seg"><span class="label"><span class="dot 완료"></span>완료</span><span class="value num">${s.done}</span></div>
     <div class="board-seg"><span class="label">이번달 처리</span><span class="value num">${s.this_month_count}</span></div>
-    <div class="board-seg"><span class="label">이번달 비용</span><span class="value num">${s.this_month_cost_krw}<span style="font-size:16px;">원</span></span></div>
+    <div class="board-seg"><span class="label">이번달 비용</span><span class="value num">${s.this_month_cost_krw}<span class="unit">원</span></span></div>
     <div class="board-seg"><span class="label">채널별 누적</span><span class="value small">${channelLine || "-"}</span></div>
   `;
 }
 
-// ---- 상단 메뉴: 대시보드 / 장애이력관리 / 라이선스관리 (+ 보조 메뉴)
+// ---- 상단 메뉴: 대시보드 / 장애이력관리 / 라이선스관리 (+ 보조 메뉴, 사용자 박스)
 (function injectNav() {
   const main = [["/", "대시보드"], ["/claims", "장애이력관리"], ["/licenses", "라이선스관리"]];
   const sub = [["/manuals", "매뉴얼"], ["/submit", "고객 접수 화면"]];
   const path = location.pathname.replace(/\/+$/, "") || "/";
   const link = ([href, label], cls) =>
-    `<a href="${href}" class="${cls}${path === href ? " active" : ""}"${path === href ? ' aria-current="page"' : ""}>${label}</a>`;
+    `<a href="${href}" data-label="${label}" class="${cls}${path === href ? " active" : ""}"${path === href ? ' aria-current="page"' : ""}>${label}</a>`;
   const nav = document.createElement("nav");
   nav.className = "site-nav";
   nav.setAttribute("aria-label", "주 메뉴");
   nav.innerHTML =
     `<span class="site-nav-brand">클레임 통합관리</span>` +
-    main.map(m => link(m, "site-nav-link")).join("") +
+    `<div class="site-nav-tabs">${main.map(m => link(m, "site-nav-link")).join("")}</div>` +
     `<span class="site-nav-spacer"></span>` +
-    sub.map(m => link(m, "site-nav-sub")).join("");
+    `<div class="site-nav-subs">${sub.map(m => link(m, "site-nav-sub")).join("")}</div>` +
+    `<div id="user-box" class="user-box"></div>`;
   document.body.insertBefore(nav, document.body.firstChild);
 })();

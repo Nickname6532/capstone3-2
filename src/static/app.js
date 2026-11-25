@@ -68,7 +68,7 @@ async function loadClaims() {
       <td class="num">${escapeHtml(c.contact || "-")}</td>
       <td>${escapeHtml(c.product)}</td>
       <td class="type-cell">${escapeHtml(c.category || "-")}</td>
-      <td class="desc-cell">${escapeHtml(c.description)}</td>
+      <td class="desc-cell"><div class="desc-clamp" title="${escapeHtml(c.description)}">${escapeHtml(c.description)}</div></td>
       <td><input class="assignee-input" value="${escapeHtml(c.assignee || "")}" placeholder="미배정" ${c.status === "완료" ? "disabled" : ""}/></td>
       <td>${difficultyBadge(c.difficulty)}</td>
       <td><span class="status-word s-${c.status}">${c.status}</span></td>
@@ -243,7 +243,7 @@ document.getElementById("import-btn").addEventListener("click", async () => {
         data.failed_rows.map(f => `<li>${f.row ? f.row + "행: " : ""}${escapeHtml(f.reason)}</li>`));
     }
     if (data.duplicate_rows && data.duplicate_rows.length) {
-      html += importList("중복 (건너뜀)", "var(--warn)",
+      html += importList("중복 (건너뜀)", "var(--warn-ink)",
         data.duplicate_rows.map(d => `<li>${d.row ? d.row + "행: " : ""}${d.license_key ? escapeHtml(d.license_key) + " — " : ""}${escapeHtml(d.reason)}</li>`));
     }
     if (data.warnings && data.warnings.length) {
@@ -431,7 +431,7 @@ async function openDetail(claimId) {
   const res = await apiFetch(`/api/claims/${claimId}`);
   const claim = await res.json();
 
-  document.getElementById("detail-modal-title").textContent = `클레임 상세 · ${claim.claim_id}`;
+  document.getElementById("detail-modal-title").textContent = `클레임 상세: ${claim.claim_id}`;
   document.getElementById("detail-processing-type").value = claim.processing_type || "";
   document.getElementById("detail-sub-status").value = claim.sub_status || "";
   document.getElementById("detail-difficulty").value = claim.difficulty || "";
