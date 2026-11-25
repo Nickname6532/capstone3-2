@@ -574,3 +574,4 @@ th.sortable.sorted .sort-ind { color: var(--amber); }
 .reg-mode.add { background: var(--amber-dim); color: var(--amber); }
 .list-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 10px; }
 .list-toolbar label { min-width: 150px; }
+.reg-level input[type="radio"], label input[type="radio"], label input[type="checkbox"] { width: auto; display: inline-block; margin: 0; }
