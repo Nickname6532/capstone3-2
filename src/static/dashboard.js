@@ -1,10 +1,15 @@
 // 대시보드 전용: 만기 타임라인, 만료 임박 목록, 상태 요약, 담당자별 실적.
 
 const TL_DAYS = 120;      // 타임라인이 보여주는 범위(오늘부터 +120일)
-const TL_LANE_H = 28;     // 라벨 한 줄(레인) 높이
+const TL_LANE_H = 18;     // 라벨 한 줄(레인) 높이
 const TL_AXIS_H = 48;     // 축 + 눈금 라벨 영역 높이
-const TL_TOP_PAD = 10;
+const TL_TOP_PAD = 34;
 const tl = { host: null, items: [], lastWidth: 0 };
+
+// 항목마다 서로 다른 색(황금각 간격)을 주어 타임라인 점과 목록 행을 색으로 짝짓는다.
+function hueOf(i) {
+  return Math.round((i * 137.5 + 8) % 360);
+}
 
 function isExpired(lic) {
   return lic.status === "만료";
@@ -50,7 +55,8 @@ function buildTimeline(host, items) {
   items.forEach((lic, i) => {
     const b = document.createElement("button");
     b.type = "button";
-    b.className = `tl-marker ${isExpired(lic) ? "sev-danger" : "sev-warn"}`;
+    b.className = "tl-marker hued";
+    b.style.setProperty("--h", String(hueOf(i)));
     b.dataset.key = String(i);
     b.style.setProperty("--i", String(Math.min(i, 14)));
     const full = `${lic.customer_name} / ${lic.product_name} / 만료일 ${lic.end_date} (${lic.status})`;
@@ -58,7 +64,8 @@ function buildTimeline(host, items) {
     b.setAttribute("aria-label", `${full}, ${ddayText(lic)}. 누르면 아래 목록에서 해당 항목을 표시합니다`);
     b.innerHTML =
       `<span class="tl-stem"></span>` +
-      `<span class="tl-label"><span class="tl-name">${escapeHtml(lic.customer_name)}</span>` +
+      `<span class="tl-label" aria-hidden="true"></span>` +
+      `<span class="tl-tip"><span class="tl-name">${escapeHtml(lic.customer_name)}</span>` +
       `<span class="tl-dday num">${ddayText(lic)}</span></span>`;
     plot.appendChild(b);
   });
@@ -102,26 +109,14 @@ function layoutTimeline() {
   const order = markers
     .map(m => ({ m, lic: items[Number(m.dataset.key)] }))
     .sort((a, b) => xOf(a.lic.days_left) - xOf(b.lic.days_left) || a.lic.days_left - b.lic.days_left);
-  const GAP = 8;
+  const GAP = 2;
   const lanesLo = [];   // lanesLo[i] = i번 레인에 이미 놓인 라벨 구간 [lo, hi] 목록
   let lanes = 1;
 
   for (const { m, lic } of order) {
-    const label = m.querySelector(".tl-label");
-    label.style.maxWidth = "";
     const x = xOf(lic.days_left);
-    let w = label.getBoundingClientRect().width;
-    if (!(w > 0)) w = Math.min(200, 56 + String(lic.customer_name || "").length * 14);
-    const roomRight = W - 4 - (x + 6);
-    const roomLeft = x - 6 - 4;
-    let flip = false;
-    if (w > roomRight) {
-      flip = roomLeft > roomRight;
-      const room = Math.max(60, flip ? roomLeft : roomRight);
-      if (w > room) { w = room; label.style.maxWidth = `${Math.floor(w)}px`; }
-    }
-    const lo = flip ? x - 6 - w : x + 6;
-    const hi = lo + w;
+    const flip = x > W - 150;   // 툴팁이 오른쪽 밖으로 나가지 않게
+    const lo = x - 8, hi = x + 8;
     let lane = 0;
     while ((lanesLo[lane] || []).some(r => lo < r[1] + GAP && r[0] < hi + GAP)) lane++;
     (lanesLo[lane] = lanesLo[lane] || []).push([lo, hi]);
@@ -226,7 +221,7 @@ async function loadLicenseAlerts() {
   el.classList.add("alert-board");
   const items = licenses.slice().sort((a, b) => a.days_left - b.days_left);
   body.innerHTML = items.map((lic, i) => `
-      <div class="alert-row ${isExpired(lic) ? "sev-danger" : "sev-warn"}" data-key="${i}">
+      <div class="alert-row hued" style="--h:${hueOf(i)}" data-key="${i}">
         <span class="dday num">${ddayText(lic)}</span>
         <span class="who"><strong class="cust">${escapeHtml(lic.customer_name)}</strong>
           <span class="prod">${escapeHtml(lic.product_name)}</span>
