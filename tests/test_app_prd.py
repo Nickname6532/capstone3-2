@@ -86,7 +86,7 @@ def test_attachment_endpoints_require_login():
 # ---------------------------------------------------------------- 고객사/제품/라이선스 CRUD + overview
 
 def test_customer_product_license_crud_endpoints(client):
-    cust = client.post("/api/customers", json={"name": "가나전자", "email": "ops@gana.com"}).json()
+    cust = client.post("/api/customers", json={"category": "테스트", "name": "가나전자", "email": "ops@gana.com"}).json()
     assert client.patch(f"/api/customers/{cust['id']}", json={"memo": "VIP"}).json()["memo"] == "VIP"
     prod = client.post("/api/products", json={"customer_id": cust["id"], "name": "냉장고"}).json()
     client.patch(f"/api/products/{prod['id']}", json={"name": "냉장고 K200"})
@@ -99,13 +99,13 @@ def test_customer_product_license_crud_endpoints(client):
 
 
 def test_delete_customer_with_products_returns_409(client):
-    cust = client.post("/api/customers", json={"name": "가나전자"}).json()
+    cust = client.post("/api/customers", json={"category": "테스트", "name": "가나전자"}).json()
     client.post("/api/products", json={"customer_id": cust["id"], "name": "냉장고"})
     assert client.delete(f"/api/customers/{cust['id']}").status_code == 409
 
 
 def test_customer_overview_endpoint(client):
-    cust = client.post("/api/customers", json={"name": "가나전자"}).json()
+    cust = client.post("/api/customers", json={"category": "테스트", "name": "가나전자"}).json()
     prod = client.post("/api/products", json={"customer_id": cust["id"], "name": "냉장고"}).json()
     client.post("/api/licenses", json={"product_id": prod["id"], "start_date": _iso(-10), "end_date": _iso(10)})
     client.post("/api/claims", json={"assignee": "담당자", "customer": "가나전자", "product": "냉장고", "description": "D", "customer_id": cust["id"]})
@@ -400,3 +400,58 @@ def test_claims_date_range_filter_uses_issue_start_then_created(client):
     assert old["claim_id"] not in ids(date_from="2026-02-01")
     assert ids(date_to="2026-01-10") == {old["claim_id"]}  # 끝 날짜 포함
     assert no_issue_date["claim_id"] in ids(date_from=no_issue_date["created_at"][:10], date_to=no_issue_date["created_at"][:10])
+
+
+# ---- 리뷰 반영: 단일 입력창 등록(고객사 / +제품 / +라이선스, 신규·추가) ----
+
+def test_registration_customer_only_then_add_product_then_license(client):
+    r1 = client.post("/api/registrations", json={"customer_name": "신규사", "category": "대학"})
+    assert r1.status_code == 200
+    body = r1.json()
+    assert body["created"] == {"customer": True, "product": False, "license": False}
+    assert body["product"] is None and body["license"] is None
+
+    r2 = client.post("/api/registrations", json={"customer_name": "신규사", "product_name": "VMware"}).json()
+    assert r2["created"] == {"customer": False, "product": True, "license": False}  # 추가등록: 구분 없이도 가능
+    assert r2["customer"]["id"] == body["customer"]["id"]
+
+    r3 = client.post("/api/registrations", json={
+        "customer_name": " 신규사 ", "product_name": "vmware", "start_date": "2026-01-01", "end_date": "2027-01-01",
+        "license_key": "AAAA-1111",
+    }).json()
+    assert r3["created"] == {"customer": False, "product": False, "license": True}  # 대소문자/공백 무시하고 기존 제품 재사용
+    assert r3["product"]["id"] == r2["product"]["id"]
+    assert r3["license"]["license_key"] == "AAAA-1111"
+    assert len(client.get("/api/customers").json()) == 1
+
+
+def test_registration_one_shot_customer_product_license(client):
+    res = client.post("/api/registrations", json={
+        "customer_name": "한방사", "category": "코스피", "product_name": "VMware",
+        "start_date": "2026-01-01", "end_date": "2028-01-01", "license_key": "ZZZ-1",
+    }).json()
+    assert res["created"] == {"customer": True, "product": True, "license": True}
+    assert client.get("/api/licenses").json()[0]["customer_name"] == "한방사"
+
+
+def test_registration_validation(client):
+    def post(**kw):
+        return client.post("/api/registrations", json=kw)
+
+    assert post(customer_name="  ").status_code == 400
+    r = post(customer_name="새고객")  # 신규인데 구분 없음
+    assert r.status_code == 400 and "구분" in r.json()["detail"]
+    assert post(customer_name="새고객", category="대학", start_date="2026-01-01", end_date="2027-01-01").status_code == 400  # 제품 없이 라이선스
+    assert post(customer_name="새고객", category="대학", product_name="P", start_date="2026-01-01").status_code == 400  # 만료일 누락
+    assert post(customer_name="새고객", category="대학", product_name="P", start_date="2027-01-01", end_date="2026-01-01").status_code == 400
+    assert client.get("/api/customers").json() == []  # 검증 실패 시 아무것도 만들어지지 않는다
+    ok = {"customer_name": "새고객", "category": "대학", "product_name": "P", "start_date": "2026-01-01", "end_date": "2027-01-01", "license_key": "DUP-1"}
+    assert post(**ok).status_code == 200
+    dup = post(customer_name="새고객", product_name="P", start_date="2026-01-01", end_date="2027-01-01", license_key="DUP-1")
+    assert dup.status_code == 400 and "이미 등록된 라이선스 키" in dup.json()["detail"]
+
+
+def test_customer_create_requires_name_and_category(client):
+    assert client.post("/api/customers", json={"name": "A", "category": ""}).status_code == 400
+    assert client.post("/api/customers", json={"name": " ", "category": "대학"}).status_code == 400
+    assert client.post("/api/customers", json={"name": "A", "category": "대학"}).status_code == 200

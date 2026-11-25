@@ -41,7 +41,7 @@ def test_license_endpoints_require_login():
 
 
 def test_create_customer_product_license_via_api(client):
-    res = client.post("/api/customers", json={"name": "가나전자", "contact": ""})
+    res = client.post("/api/customers", json={"category": "테스트", "name": "가나전자", "contact": ""})
     assert res.status_code == 200
     customer_id = res.json()["id"]
 
@@ -69,7 +69,7 @@ def test_create_customer_product_license_via_api(client):
 
 
 def test_create_license_rejects_end_before_start(client):
-    res = client.post("/api/customers", json={"name": "고객"})
+    res = client.post("/api/customers", json={"category": "테스트", "name": "고객"})
     customer_id = res.json()["id"]
     res = client.post("/api/products", json={"customer_id": customer_id, "name": "제품"})
     product_id = res.json()["id"]

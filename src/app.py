@@ -379,9 +379,94 @@ class LicenseUpdate(BaseModel):
 
 @app.post("/api/customers")
 def create_customer(payload: CustomerCreate, _: dict = Depends(require_login)):
+    data = payload.model_dump()
+    _require_fields(data, {"name": "고객사명", "category": "구분"})
     return store.create_customer(
-        payload.name, payload.contact or "", payload.email or "", payload.memo or "", payload.category or ""
+        data["name"], payload.contact or "", payload.email or "", payload.memo or "", data["category"]
     )
+
+
+class RegistrationCreate(BaseModel):
+    """고객사 / 고객사+제품 / 고객사+제품+라이선스를 한 번에 등록하는 단일 입력창용 요청.
+
+    - 고객사명이 이미 있으면 그 고객사에 추가 등록, 없으면 신규 등록한다(구분은 신규일 때 필수).
+    - product_name이 비어 있으면 고객사만, 있으면 제품까지(이미 있는 제품이면 재사용).
+    - start_date/end_date가 있으면 라이선스까지 등록한다(제품명 필수).
+    """
+
+    customer_name: str
+    category: Optional[str] = ""
+    contact: Optional[str] = ""
+    email: Optional[str] = ""
+    memo: Optional[str] = ""
+    product_name: Optional[str] = ""
+    plan_name: Optional[str] = ""
+    start_date: Optional[str] = ""
+    end_date: Optional[str] = ""
+    license_key: Optional[str] = ""
+    warning_days: Optional[int] = 30
+    notify_staff_emails: Optional[str] = ""
+    notify_customer_emails: Optional[str] = ""
+    notify_target_option: Optional[str] = "both"
+
+
+@app.post("/api/registrations")
+def create_registration(payload: RegistrationCreate, _: dict = Depends(require_login)):
+    data = payload.model_dump()
+    for key in ("customer_name", "category", "product_name", "license_key", "start_date", "end_date"):
+        data[key] = (data.get(key) or "").strip()
+    _require_fields(data, {"customer_name": "고객사명"})
+
+    wants_license = bool(data["start_date"] or data["end_date"] or data["license_key"])
+    if wants_license and not data["product_name"]:
+        raise HTTPException(status_code=400, detail="라이선스를 등록하려면 제품명을 입력해주세요")
+    if wants_license:
+        _require_fields(data, {"start_date": "시작일", "end_date": "만료일"})
+        if data["end_date"] < data["start_date"]:
+            raise HTTPException(status_code=400, detail="만료일은 시작일 이후여야 합니다")
+        if data["license_key"] and store.find_license_by_key(data["license_key"]):
+            raise HTTPException(status_code=400, detail=f"이미 등록된 라이선스 키입니다: {data['license_key']}")
+
+    existing = next((c for c in store.list_customers() if c["name"].strip().lower() == data["customer_name"].lower()), None)
+    if existing is None:
+        _require_fields(data, {"category": "구분"})  # 신규 고객사는 구분이 필수
+        customer = store.create_customer(
+            data["customer_name"], data["contact"] or "", data["email"] or "", data["memo"] or "", data["category"]
+        )
+    else:
+        customer = existing
+
+    result: dict[str, Any] = {
+        "customer": customer, "product": None, "license": None,
+        "created": {"customer": existing is None, "product": False, "license": False},
+    }
+    if not data["product_name"]:
+        return result
+
+    product = next(
+        (p for p in store.list_products(customer_id=customer["id"]) if p["name"].strip().lower() == data["product_name"].lower()),
+        None,
+    )
+    result["created"]["product"] = product is None
+    if product is None:
+        product = store.create_product(customer["id"], data["product_name"])
+    result["product"] = product
+
+    if wants_license:
+        try:
+            result["license"] = store.create_license(
+                product["id"], data["plan_name"] or "", data["start_date"], data["end_date"],
+                data["email"] or "",
+                warning_days=data["warning_days"] or 30,
+                notify_staff_emails=data["notify_staff_emails"] or "",
+                notify_customer_emails=data["notify_customer_emails"] or "",
+                notify_target_option=data["notify_target_option"] or "both",
+                license_key=data["license_key"],
+            )
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        result["created"]["license"] = True
+    return result
 
 
 @app.get("/api/customers")
