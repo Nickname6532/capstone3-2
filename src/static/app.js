@@ -1,5 +1,4 @@
 const claimsBody = document.getElementById("claims-body");
-const statsEl = document.getElementById("stats");
 const form = document.getElementById("claim-form");
 const filterStatus = document.getElementById("filter-status");
 const filterChannel = document.getElementById("filter-channel");
@@ -7,74 +6,26 @@ const filterDifficulty = document.getElementById("filter-difficulty");
 const filterAssignee = document.getElementById("filter-assignee");
 const filterContact = document.getElementById("filter-contact");
 const filterQ = document.getElementById("filter-q");
+const filterDateFrom = document.getElementById("filter-date-from");
+const filterDateTo = document.getElementById("filter-date-to");
+
+// <input type="datetime-local">은 "YYYY-MM-DDTHH:MM"만 받는다. 예전에 "YYYY-MM-DD HH:MM"으로 저장된 값도 보이게 변환.
+function toLocalInput(value) {
+  return (value || "").replace(" ", "T").slice(0, 16);
+}
+
+// 목록용 짧은 표기: 2026-11-01T09:00 -> 11-01 09:00
+function shortWhen(value) {
+  const v = (value || "").replace("T", " ");
+  return v ? v.slice(5, 16) : "";
+}
+
+function issuePeriodText(c) {
+  if (!c.issue_started_at && !c.issue_ended_at) return "";
+  return `장애 ${shortWhen(c.issue_started_at) || "?"} ~ ${shortWhen(c.issue_ended_at) || "진행중"}`;
+}
 
 attachPhoneAutoFormat(document.getElementById("internal-contact-input"));
-
-async function apiFetch(url, options) {
-  const res = await fetch(url, options);
-  if (res.status === 401) {
-    location.href = "/login";
-    throw new Error("로그인이 필요합니다");
-  }
-  return res;
-}
-
-async function loadUser() {
-  const res = await apiFetch("/api/auth/me");
-  const me = await res.json();
-  const adminLink = me.role === "admin" ? ` · <a href="/admin">계정 관리</a>` : "";
-  document.getElementById("user-box").innerHTML =
-    `${escapeHtml(me.display_name)}님 (${escapeHtml(me.role)})${adminLink} · <a href="#" id="logout-link">로그아웃</a>`;
-  document.getElementById("logout-link").addEventListener("click", async (e) => {
-    e.preventDefault();
-    await fetch("/api/auth/logout", { method: "POST" });
-    location.href = "/login";
-  });
-}
-
-async function loadLicenseAlerts() {
-  const el = document.getElementById("license-alert");
-  const body = document.getElementById("license-alert-body");
-  const res = await apiFetch("/api/licenses/expiring");
-  const licenses = await res.json();
-
-  if (!licenses.length) {
-    el.classList.remove("alert-board");
-    body.innerHTML = `<p class="alert-empty">만료 임박하거나 만료된 라이선스가 없습니다.</p>`;
-    return;
-  }
-
-  el.classList.add("alert-board");
-  body.innerHTML = licenses.map(lic => {
-    const when = lic.status === "만료"
-      ? `${Math.abs(lic.days_left)}일 전 만료됨`
-      : `${lic.days_left}일 후 만료`;
-    return `
-      <div class="alert-row">
-        <span class="who">${escapeHtml(lic.customer_name)} · ${escapeHtml(lic.product_name)}
-          <span class="status-word lic-${lic.status}">${lic.status}</span>
-        </span>
-        <span class="when num">${escapeHtml(lic.end_date)} (${when})</span>
-      </div>
-    `;
-  }).join("");
-}
-
-async function loadStats() {
-  const res = await apiFetch("/api/stats/summary");
-  const s = await res.json();
-  const channelLine = Object.entries(s.channel_breakdown || {})
-    .map(([ch, n]) => `${ch} ${n}`)
-    .join(" · ");
-  statsEl.innerHTML = `
-    <div class="board-seg"><span class="label"><span class="dot 접수"></span>접수</span><span class="value num">${s.received}</span></div>
-    <div class="board-seg"><span class="label"><span class="dot 처리중"></span>처리중</span><span class="value num">${s.in_progress}</span></div>
-    <div class="board-seg"><span class="label"><span class="dot 완료"></span>완료</span><span class="value num">${s.done}</span></div>
-    <div class="board-seg"><span class="label">이번달 처리</span><span class="value num">${s.this_month_count}</span></div>
-    <div class="board-seg"><span class="label">이번달 비용</span><span class="value num">${s.this_month_cost_krw}<span style="font-size:16px;">원</span></span></div>
-    <div class="board-seg"><span class="label">채널별 누적</span><span class="value small">${channelLine || "-"}</span></div>
-  `;
-}
 
 function statusOptions(current) {
   const next = { "접수": ["처리중", "완료"], "처리중": ["완료", "접수"], "완료": [] }[current] || [];
@@ -98,13 +49,20 @@ async function loadClaims() {
   if (filterAssignee.value) params.set("assignee", filterAssignee.value);
   if (filterContact.value) params.set("contact", filterContact.value);
   if (filterQ.value) params.set("q", filterQ.value);
+  if (filterDateFrom.value) params.set("date_from", filterDateFrom.value);
+  if (filterDateTo.value) params.set("date_to", filterDateTo.value);
+  if (filterDateFrom.value && filterDateTo.value && filterDateTo.value < filterDateFrom.value) {
+    document.getElementById("claims-count").textContent = "기간의 종료일이 시작일보다 빠릅니다.";
+    return;
+  }
   const res = await apiFetch("/api/claims?" + params.toString());
   const claims = await res.json();
 
   claimsBody.innerHTML = claims.map(c => `
     <tr data-id="${c.claim_id}" class="s-${c.status}">
       <td class="num">${c.claim_id}</td>
-      <td class="num">${escapeHtml((c.created_at || "").slice(0, 16))}</td>
+      <td class="num">${escapeHtml((c.created_at || "").slice(0, 16))}${
+        issuePeriodText(c) ? `<br><span class="muted period-line">${escapeHtml(issuePeriodText(c))}</span>` : ""}</td>
       <td>${escapeHtml(c.channel || "내부입력")}</td>
       <td>${escapeHtml(c.customer)}</td>
       <td class="num">${escapeHtml(c.contact || "-")}</td>
@@ -121,6 +79,11 @@ async function loadClaims() {
       </td>
     </tr>
   `).join("");
+
+  const filtered = Boolean(filterStatus.value || filterChannel.value || filterDifficulty.value || filterAssignee.value ||
+    filterContact.value || filterQ.value || filterDateFrom.value || filterDateTo.value);
+  document.getElementById("claims-count").textContent =
+    `${filtered ? "검색 결과" : "전체"} ${claims.length}건` + (filtered ? "" : " (최신순)");
 
   claimsBody.querySelectorAll("tr").forEach(tr => {
     const id = tr.dataset.id;
@@ -144,17 +107,48 @@ async function updateClaim(id, updates) {
     alert("업데이트 실패: " + (err.detail || res.status));
     return;
   }
-  await Promise.all([loadClaims(), loadStats(), loadAnalytics()]);
+  await Promise.all([loadClaims(), loadStats()]);
 }
 
-function escapeHtml(str) {
-  const div = document.createElement("div");
-  div.textContent = str ?? "";
-  return div.innerHTML;
+function showFormError(message) {
+  const el = document.getElementById("claim-form-error");
+  el.textContent = message || "";
+  el.hidden = !message;
+}
+
+// 필수 항목이 비었거나 공백뿐이면 등록하지 않고 첫 빈 칸으로 이동한다.
+function validateClaimForm() {
+  const labels = { customer: "고객사", product: "서비스/플랜", assignee: "담당자", description: "장애 내용" };
+  const missing = [];
+  let firstEmpty = null;
+  for (const [name, label] of Object.entries(labels)) {
+    const input = form.elements[name];
+    input.classList.remove("invalid");
+    if (!input.value.trim()) {
+      missing.push(label);
+      input.classList.add("invalid");
+      firstEmpty = firstEmpty || input;
+    }
+  }
+  if (missing.length) {
+    showFormError(`필수 항목을 입력해주세요: ${missing.join(", ")}`);
+    firstEmpty.focus();
+    return false;
+  }
+  const started = form.elements["issue_started_at"].value;
+  const ended = form.elements["issue_ended_at"].value;
+  if (started && ended && ended < started) {
+    showFormError("장애 종료시점이 발생시점보다 빠릅니다.");
+    form.elements["issue_ended_at"].focus();
+    return false;
+  }
+  showFormError("");
+  return true;
 }
 
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (!validateClaimForm()) return;
   const fd = new FormData(form);
   const payload = Object.fromEntries(fd.entries());
   delete payload["claim-form-files"];
@@ -194,12 +188,13 @@ form.addEventListener("submit", async (e) => {
   }
 
   form.reset();
+  showFormError("");
   fileInput.value = "";
   delete form.dataset.customerId;
   delete form.dataset.productId;
   delete form.dataset.licenseId;
   document.getElementById("license-badge").innerHTML = "";
-  await Promise.all([loadClaims(), loadStats(), loadAnalytics()]);
+  await Promise.all([loadClaims(), loadStats()]);
 });
 
 const importKind = document.getElementById("import-kind");
@@ -257,7 +252,7 @@ document.getElementById("import-btn").addEventListener("click", async () => {
     }
     resultEl.innerHTML = html;
     fileInput.value = "";
-    await Promise.all([loadClaims(), loadStats(), loadAnalytics(), loadLicenseAlerts(), loadFieldSuggestions()]);
+    await Promise.all([loadClaims(), loadStats(), loadFieldSuggestions()]);
   } catch (err) {
     resultEl.innerHTML = `<p style="color: var(--danger);">네트워크 오류로 가져오기에 실패했습니다.</p>`;
   } finally {
@@ -273,6 +268,14 @@ filterDifficulty.addEventListener("change", loadClaims);
 filterAssignee.addEventListener("input", debounce(loadClaims, 300));
 filterContact.addEventListener("input", debounce(loadClaims, 300));
 filterQ.addEventListener("input", debounce(loadClaims, 300));
+filterDateFrom.addEventListener("change", loadClaims);
+filterDateTo.addEventListener("change", loadClaims);
+document.getElementById("reset-filter-btn").addEventListener("click", () => {
+  for (const el of [filterStatus, filterChannel, filterDifficulty, filterAssignee, filterContact, filterQ, filterDateFrom, filterDateTo]) {
+    el.value = "";
+  }
+  loadClaims();
+});
 
 function debounce(fn, ms) {
   let t;
@@ -434,8 +437,10 @@ async function openDetail(claimId) {
   document.getElementById("detail-difficulty").value = claim.difficulty || "";
   document.getElementById("detail-processing-minutes").value = claim.processing_minutes || 0;
   document.getElementById("detail-visit-time").value = claim.visit_time || "";
-  document.getElementById("detail-scheduled-visit").value = claim.scheduled_visit_at || "";
-  document.getElementById("detail-completed-visit").value = claim.completed_visit_at || "";
+  document.getElementById("detail-issue-started").value = toLocalInput(claim.issue_started_at);
+  document.getElementById("detail-issue-ended").value = toLocalInput(claim.issue_ended_at);
+  document.getElementById("detail-scheduled-visit").value = toLocalInput(claim.scheduled_visit_at);
+  document.getElementById("detail-completed-visit").value = toLocalInput(claim.completed_visit_at);
   document.getElementById("detail-partner-name").value = claim.partner_name || "";
   document.getElementById("detail-partner-contact").value = claim.partner_contact || "";
   document.getElementById("detail-resolution").value = claim.resolution || "";
@@ -464,6 +469,8 @@ document.getElementById("detail-save-btn").addEventListener("click", async () =>
     difficulty: document.getElementById("detail-difficulty").value,
     processing_minutes: Number(document.getElementById("detail-processing-minutes").value || 0),
     visit_time: document.getElementById("detail-visit-time").value,
+    issue_started_at: document.getElementById("detail-issue-started").value,
+    issue_ended_at: document.getElementById("detail-issue-ended").value,
     scheduled_visit_at: document.getElementById("detail-scheduled-visit").value,
     completed_visit_at: document.getElementById("detail-completed-visit").value,
     partner_name: document.getElementById("detail-partner-name").value,
@@ -501,34 +508,7 @@ document.getElementById("detail-upload-btn").addEventListener("click", async () 
   await loadDetailAttachments(detailClaimId);
 });
 
-async function loadAnalytics() {
-  const el = document.getElementById("analytics-body");
-  const data = await apiFetch("/api/stats/analytics").then(r => r.json());
-  if (!data.by_assignee.length) {
-    el.innerHTML = `<p class="hint">아직 집계할 클레임이 없습니다.</p>`;
-    return;
-  }
-  const maxDone = Math.max(1, ...data.by_assignee.map(a => a.done));
-  el.innerHTML = `
-    <div class="analytics-rows">
-      ${data.by_assignee.map(a => `
-        <div class="analytics-row">
-          <span class="analytics-name">${escapeHtml(a.assignee)}</span>
-          <span class="analytics-bar-track">
-            <span class="analytics-bar" style="width:${(a.done / maxDone) * 100}%"></span>
-          </span>
-          <span class="analytics-figures num">
-            완료 ${a.done} · 완료율 ${a.completion_rate}% · 평균 ${a.avg_processing_minutes}분
-          </span>
-        </div>
-      `).join("")}
-    </div>
-  `;
-}
-
 loadUser();
-loadLicenseAlerts();
 loadFieldSuggestions();
 loadStats();
-loadAnalytics();
 loadClaims();

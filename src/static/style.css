@@ -538,3 +538,39 @@ td.type-cell { white-space: normal; min-width: 90px; max-width: 120px; line-heig
 
   .analytics-row { grid-template-columns: 1fr; gap: 4px; }
 }
+
+/* ===== 상단 메뉴 / 페이지 머리말 / 폼 보조 요소 (리뷰 반영) — 테마 변수 사용 ===== */
+.site-nav {
+  position: sticky; top: 0; z-index: 30;
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  padding: 8px 20px; background: var(--surface); color: var(--text);
+  border-bottom: 3px solid var(--amber);
+}
+.site-nav-brand { font-weight: 700; margin-right: 14px; font-size: 14px; letter-spacing: .02em; color: var(--amber); }
+.site-nav a { color: var(--text); text-decoration: none; padding: 7px 14px; border-radius: 6px; font-size: 14px; }
+.site-nav a:hover { background: var(--surface-raised); outline: 1px solid var(--line); }
+.site-nav a.active { background: var(--amber); color: #1b1608; font-weight: 700; }
+.site-nav-sub { font-size: 12.5px !important; color: var(--muted) !important; }
+.site-nav-sub.active { color: #1b1608 !important; }
+.site-nav-spacer { flex: 1; }
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.user-box { font-size: 12.5px; color: var(--muted); text-align: right; }
+.req { color: var(--coral); font-weight: 700; }
+.req-note { margin: 0 0 8px; }
+.form-error { color: var(--coral); font-weight: 600; margin: 8px 0; }
+input.invalid, select.invalid, textarea.invalid { border-color: var(--coral) !important; background: var(--coral-dim) !important; }
+.period-line { font-size: 11.5px; white-space: nowrap; }
+input[type="date"], input[type="datetime-local"] { min-width: 160px; }
+th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+th.sortable:hover { background: var(--surface-raised); }
+th.sortable .sort-ind { display: inline-block; width: 1em; color: var(--muted); font-size: 11px; }
+th.sortable.sorted .sort-ind { color: var(--amber); }
+.empty-hint { padding: 22px 12px; text-align: center; color: var(--muted); }
+.reg-level { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
+.reg-level label { display: inline-flex; flex-direction: row; align-items: center; gap: 6px; padding: 7px 12px; border: 1px solid var(--line); border-radius: 8px; cursor: pointer; background: var(--surface-raised); }
+.reg-level label.on { border-color: var(--amber); background: var(--amber-dim); font-weight: 700; }
+.reg-mode { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: 700; }
+.reg-mode.new { background: var(--moss-dim); color: var(--moss); }
+.reg-mode.add { background: var(--amber-dim); color: var(--amber); }
+.list-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 10px; }
+.list-toolbar label { min-width: 150px; }

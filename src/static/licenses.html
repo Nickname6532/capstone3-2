@@ -3,68 +3,124 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>라이선스 관리</title>
-<link rel="stylesheet" href="/static/style.css?v=12" />
+<title>라이선스관리</title>
+<link rel="stylesheet" href="/static/style.css?v=13" />
 </head>
 <body>
-<header>
-  <h1>라이선스·고객 관리</h1>
-  <p class="sub"><a href="/">← 현황판으로</a></p>
+<header class="page-head">
+  <div>
+    <h1>라이선스관리</h1>
+    <p class="sub">고객사 · 제품 · 라이선스를 한 곳에서 등록하고 검색·정렬합니다</p>
+  </div>
+  <div id="user-box" class="user-box"></div>
 </header>
 
 <main>
+  <!-- ============ 단일 입력창 등록 ============ -->
   <section class="panel">
     <div class="panel-head">
-      <h2>고객사 등록</h2>
-      <p class="hint">제품·라이선스를 연결하려면 먼저 고객사가 있어야 합니다</p>
+      <h2>등록</h2>
+      <p class="hint">고객사만 · 고객사+제품 · 고객사+제품+라이선스 중 필요한 범위만 선택해 등록합니다</p>
     </div>
-    <form id="customer-form">
+    <form id="reg-form" novalidate>
+      <div class="reg-level" id="reg-level" role="radiogroup" aria-label="등록 범위">
+        <label class="on"><input type="radio" name="reg-level" value="1" checked /> 고객사만</label>
+        <label><input type="radio" name="reg-level" value="2" /> 고객사 + 제품</label>
+        <label><input type="radio" name="reg-level" value="3" /> 고객사 + 제품 + 라이선스</label>
+      </div>
+      <p class="hint req-note"><span class="req">*</span> 표시는 필수 입력입니다 · 이미 있는 고객사/제품 이름을 입력하면 <b>추가 등록</b>, 없으면 <b>신규 등록</b>됩니다</p>
+
       <div class="row">
-        <label>고객사명(사이트명) <input name="name" required /></label>
-        <label>구분 <input name="category" placeholder="예: 코스피, 대학" /></label>
+        <label>고객사명(사이트명) <span class="req">*</span> <span id="reg-customer-mode"></span>
+          <input name="customer_name" id="reg-customer-name" list="reg-customer-list" autocomplete="off" />
+        </label>
+        <label>구분 <span class="req" id="reg-category-req">*</span>
+          <input name="category" id="reg-category" placeholder="예: 코스피, 대학" />
+        </label>
         <label>연락처 <input name="contact" placeholder="담당자 연락처(선택)" /></label>
         <label>이메일 <input name="email" type="email" placeholder="담당자 이메일(선택)" /></label>
+      </div>
+      <div class="row">
         <label>메모 <input name="memo" placeholder="VIP, 특이사항 등(선택)" /></label>
       </div>
-      <button type="submit" class="primary">고객사 추가</button>
+      <datalist id="reg-customer-list"></datalist>
+
+      <div id="reg-product-block" hidden>
+        <div class="row">
+          <label>제품명 <span class="req">*</span> <span id="reg-product-mode"></span>
+            <input name="product_name" id="reg-product-name" list="reg-product-list" autocomplete="off" placeholder="예: VMware" />
+          </label>
+        </div>
+        <datalist id="reg-product-list"></datalist>
+      </div>
+
+      <div id="reg-license-block" hidden>
+        <div class="row">
+          <label>시작일 <span class="req">*</span> <input name="start_date" id="reg-start" type="date" /></label>
+          <label>구독기간(년) <select id="reg-years">
+              <option value="">직접 입력</option><option value="1">1년</option><option value="3">3년</option><option value="5">5년</option>
+            </select>
+          </label>
+          <label>만료일 <span class="req">*</span> <input name="end_date" id="reg-end" type="date" /></label>
+          <label>라이선스 키 <input name="license_key" placeholder="선택 (중복 불가)" /></label>
+        </div>
+        <div class="row">
+          <label>플랜명 <input name="plan_name" placeholder="예: Standard" /></label>
+          <label>만료 임박 기준(일) <input name="warning_days" type="number" value="30" min="1" /></label>
+          <label>알림 대상
+            <select name="notify_target_option">
+              <option value="both" selected>담당자+고객 모두</option>
+              <option value="staff">담당자만</option>
+              <option value="customer">고객만</option>
+              <option value="none">알림 끔</option>
+            </select>
+          </label>
+        </div>
+        <div class="row">
+          <label>담당자 알림 이메일 <input name="notify_staff_emails" placeholder="ops@company.com" /></label>
+          <label>고객 알림 이메일 <input name="notify_customer_emails" placeholder="client@customer.com" /></label>
+        </div>
+      </div>
+
+      <p id="reg-error" class="form-error" role="alert" hidden></p>
+      <button type="submit" class="primary" id="reg-submit">고객사 등록</button>
     </form>
-    <div class="table-scroll" style="margin-top:14px;">
-      <table>
-        <thead><tr><th>고객사</th><th>구분</th><th>연락처</th><th>이메일</th><th>메모</th><th>액션</th></tr></thead>
-        <tbody id="customers-body"></tbody>
-      </table>
-    </div>
+    <p id="reg-result" style="font-size:13px; margin-top:10px;"></p>
   </section>
 
-  <section class="panel" id="overview-panel" hidden>
-    <div class="panel-head">
-      <h2 id="overview-title">고객사 상세</h2>
-      <button type="button" id="overview-close">닫기</button>
-    </div>
-    <div id="overview-body"></div>
-  </section>
-
+  <!-- ============ 라이선스 목록 (검색·필터·정렬, 처음엔 접힘) ============ -->
   <section class="panel">
     <div class="panel-head">
-      <h2>제품 등록</h2>
+      <h2>라이선스 목록</h2>
+      <p class="hint"><a href="/api/licenses/export.xlsx">엑셀 내보내기(가져오기와 같은 양식) ↓</a></p>
     </div>
-    <form id="product-form">
-      <div class="row">
-        <label>고객사
-          <select name="customer_id" id="product-customer-select" required></select>
-        </label>
-        <label>제품명 <input name="name" required /></label>
-      </div>
-      <button type="submit" class="primary">제품 추가</button>
-    </form>
-    <div class="table-scroll" style="margin-top:14px;">
+    <div class="list-toolbar">
+      <label>검색 <input id="lic-q" placeholder="사이트명 / 제품 / 라이선스 키" /></label>
+      <label>구분 <select id="lic-f-category"><option value="">전체</option></select></label>
+      <label>상태
+        <select id="lic-f-status">
+          <option value="">전체</option><option>활성</option><option>만료 임박</option><option>만료</option>
+        </select>
+      </label>
+      <label>제품 <select id="lic-f-product"><option value="">전체</option></select></label>
+      <label>구독기간
+        <select id="lic-f-years"><option value="">전체</option><option value="1">1년</option><option value="3">3년</option><option value="5">5년</option></select>
+      </label>
+      <label>만료일(부터) <input id="lic-f-from" type="date" /></label>
+      <label>만료일(까지) <input id="lic-f-to" type="date" /></label>
+      <button type="button" id="lic-show-all" class="primary">전체보기</button>
+      <button type="button" id="lic-reset">조건 초기화</button>
+    </div>
+    <p class="hint" id="lic-count"></p>
+    <div class="table-scroll">
       <table>
-        <thead><tr><th>고객사</th><th>제품</th><th>액션</th></tr></thead>
-        <tbody id="products-body"></tbody>
+        <thead><tr id="lic-head"></tr></thead>
+        <tbody id="licenses-body"></tbody>
       </table>
     </div>
   </section>
 
+  <!-- ============ 라이선스 일괄 가져오기 ============ -->
   <section class="panel">
     <div class="panel-head">
       <h2>라이선스 일괄 가져오기</h2>
@@ -81,240 +137,334 @@
     <div id="license-import-result"></div>
   </section>
 
+  <!-- ============ 사이트별 요약 / 고객사 / 제품 (필요할 때만 펼침) ============ -->
   <section class="panel">
+    <details>
+      <summary><strong>사이트별 요약</strong> <span class="hint">(눌러서 펼치기)</span></summary>
+      <div class="table-scroll" style="margin-top:12px;">
+        <table>
+          <thead><tr><th>사이트명</th><th>구분</th><th>라이선스 수</th><th>활성</th><th>만료 임박</th><th>만료</th><th>1년</th><th>3년</th><th>5년</th></tr></thead>
+          <tbody id="site-summary-body"></tbody>
+        </table>
+      </div>
+    </details>
+  </section>
+
+  <section class="panel" id="overview-panel" hidden>
     <div class="panel-head">
-      <h2>라이선스 등록</h2>
-      <p class="hint">담당자/고객 알림을 분리해서 설정할 수 있습니다</p>
+      <h2 id="overview-title">고객사 상세</h2>
+      <button type="button" id="overview-close">닫기</button>
     </div>
-    <form id="license-form">
-      <div class="row">
-        <label>고객사
-          <select id="license-customer-select" required></select>
-        </label>
-        <label>제품
-          <select name="product_id" id="license-product-select" required></select>
-        </label>
-        <label>플랜명 <input name="plan_name" placeholder="예: Standard" /></label>
-        <label>라이선스 키 <input name="license_key" placeholder="선택" /></label>
-      </div>
-      <div class="row">
-        <label>시작일 <input name="start_date" type="date" required /></label>
-        <label>만료일 <input name="end_date" type="date" required /></label>
-        <label>만료 임박 기준(일) <input name="warning_days" type="number" value="30" min="1" /></label>
-      </div>
-      <div class="row">
-        <label>알림 대상
-          <select name="notify_target_option">
-            <option value="both" selected>담당자+고객 모두</option>
-            <option value="staff">담당자만</option>
-            <option value="customer">고객만</option>
-            <option value="none">알림 끔</option>
-          </select>
-        </label>
-        <label>담당자 알림 이메일 <input name="notify_staff_emails" placeholder="ops@company.com" /></label>
-        <label>고객 알림 이메일 <input name="notify_customer_emails" placeholder="client@customer.com" /></label>
-      </div>
-      <button type="submit" class="primary">라이선스 등록</button>
-    </form>
-    <p id="license-form-result" style="font-size: 13px; margin-top: 10px;"></p>
+    <div id="overview-body"></div>
   </section>
 
   <section class="panel">
-    <div class="panel-head">
-      <h2>사이트별 요약</h2>
-      <p class="hint"><a href="/api/licenses/export.xlsx">엑셀 내보내기(가져오기와 같은 양식) ↓</a></p>
-    </div>
-    <div class="table-scroll">
-      <table>
-        <thead><tr><th>사이트명</th><th>구분</th><th>라이선스 수</th><th>활성</th><th>만료 임박</th><th>만료</th><th>1년</th><th>3년</th><th>5년</th></tr></thead>
-        <tbody id="site-summary-body"></tbody>
-      </table>
-    </div>
+    <details>
+      <summary><strong>고객사 목록</strong> <span class="hint" id="customers-count"></span></summary>
+      <div class="list-toolbar" style="margin-top:12px;">
+        <label>검색 <input id="cust-q" placeholder="고객사명 / 구분" /></label>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>고객사</th><th>구분</th><th>연락처</th><th>이메일</th><th>메모</th><th>액션</th></tr></thead>
+          <tbody id="customers-body"></tbody>
+        </table>
+      </div>
+    </details>
   </section>
 
   <section class="panel">
-    <h2>라이선스 목록</h2>
-    <div class="table-scroll">
-      <table>
-        <thead>
-          <tr><th>사이트명</th><th>구분</th><th>제품</th><th>구독기간</th><th>라이선스 키</th><th>시작일</th><th>만료일</th><th>남은 일수</th><th>기준(D-)</th><th>상태</th><th>알림 대상</th><th>액션</th></tr>
-        </thead>
-        <tbody id="licenses-body"></tbody>
-      </table>
-    </div>
+    <details>
+      <summary><strong>제품 목록</strong> <span class="hint" id="products-count"></span></summary>
+      <div class="list-toolbar" style="margin-top:12px;">
+        <label>검색 <input id="prod-q" placeholder="고객사 / 제품명" /></label>
+      </div>
+      <div class="table-scroll">
+        <table>
+          <thead><tr><th>고객사</th><th>제품</th><th>액션</th></tr></thead>
+          <tbody id="products-body"></tbody>
+        </table>
+      </div>
+    </details>
   </section>
 </main>
 
+<!-- 라이선스 수정 (달력 입력) -->
+<div class="modal-backdrop" id="lic-modal" hidden>
+  <div class="modal panel">
+    <div class="panel-head">
+      <h2 id="lic-modal-title">라이선스 수정</h2>
+      <button type="button" id="lic-modal-close">닫기</button>
+    </div>
+    <div class="row">
+      <label>시작일 <span class="req">*</span> <input id="lm-start" type="date" /></label>
+      <label>만료일 <span class="req">*</span> <input id="lm-end" type="date" /></label>
+      <label>만료 임박 기준(일) <input id="lm-warning" type="number" min="1" /></label>
+    </div>
+    <div class="row">
+      <label>플랜명 <input id="lm-plan" /></label>
+      <label>라이선스 키 <input id="lm-key" /></label>
+      <label>알림 대상
+        <select id="lm-target">
+          <option value="both">담당자+고객 모두</option><option value="staff">담당자만</option>
+          <option value="customer">고객만</option><option value="none">알림 끔</option>
+        </select>
+      </label>
+    </div>
+    <div class="row">
+      <label>담당자 알림 이메일 <input id="lm-staff" /></label>
+      <label>고객 알림 이메일 <input id="lm-customer" /></label>
+    </div>
+    <p id="lm-error" class="form-error" role="alert" hidden></p>
+    <button type="button" id="lm-save" class="primary">저장</button>
+  </div>
+</div>
+
+<script src="/static/common.js?v=1"></script>
 <script>
-  function escapeHtml(str) {
-    const div = document.createElement("div");
-    div.textContent = str ?? "";
-    return div.innerHTML;
-  }
-
-  async function apiFetch(url, options) {
-    const res = await fetch(url, options);
-    if (res.status === 401) { location.href = "/login"; throw new Error("로그인이 필요합니다"); }
-    return res;
-  }
-
   let customers = [];
   let products = [];
+  let licenses = [];
 
-  function fillCustomerSelects() {
-    const opts = customers.map(c => `<option value="${c.id}">${escapeHtml(c.name)}</option>`).join("");
-    document.getElementById("product-customer-select").innerHTML = opts || "<option value=''>고객사를 먼저 등록하세요</option>";
-    document.getElementById("license-customer-select").innerHTML = opts || "<option value=''>고객사를 먼저 등록하세요</option>";
+  const $ = (id) => document.getElementById(id);
+  const norm = (s) => String(s || "").trim().toLowerCase();
+  const NOTIFY_TARGET_LABELS = { both: "담당자+고객", staff: "담당자만", customer: "고객만", none: "끔" };
+  const STATUS_RANK = { "만료": 0, "만료 임박": 1, "활성": 2 };
+
+  async function jsonOrEmpty(res) { return res.json().catch(() => ({})); }
+  function errText(err, fallback) {
+    if (!err) return fallback;
+    if (typeof err.detail === "string") return err.detail;
+    if (Array.isArray(err.detail)) return err.detail.map(d => d.msg).join(", ");
+    return fallback;
+  }
+  function setError(el, message) { el.textContent = message || ""; el.hidden = !message; }
+
+  /* ======================= 단일 등록창 ======================= */
+  const regForm = $("reg-form");
+  const level = () => Number(regForm.querySelector("input[name='reg-level']:checked").value);
+  const LEVEL_BUTTON = { 1: "고객사 등록", 2: "고객사 + 제품 등록", 3: "고객사 + 제품 + 라이선스 등록" };
+
+  function findCustomerByName(name) { return customers.find(c => norm(c.name) === norm(name)); }
+
+  function refreshRegUi() {
+    const lv = level();
+    document.querySelectorAll("#reg-level label").forEach(l => l.classList.toggle("on", l.querySelector("input").checked));
+    $("reg-product-block").hidden = lv < 2;
+    $("reg-license-block").hidden = lv < 3;
+    $("reg-submit").textContent = LEVEL_BUTTON[lv];
+
+    const name = regForm.elements["customer_name"].value;
+    const existing = name.trim() ? findCustomerByName(name) : null;
+    $("reg-customer-mode").innerHTML = !name.trim() ? ""
+      : existing ? `<span class="reg-mode add">추가 등록 (기존 고객사)</span>` : `<span class="reg-mode new">신규 등록</span>`;
+    // 구분은 신규 고객사일 때만 필수다. 기존 고객사면 현재 값을 안내만 한다.
+    $("reg-category-req").hidden = Boolean(existing);
+    $("reg-category").placeholder = existing ? `기존 값 유지: ${existing.category || "-"}` : "예: 코스피, 대학";
+
+    const own = existing ? products.filter(p => p.customer_id === existing.id) : [];
+    $("reg-product-list").innerHTML = own.map(p => `<option value="${escapeHtml(p.name)}">`).join("");
+    const pname = regForm.elements["product_name"].value;
+    $("reg-product-mode").innerHTML = lv < 2 || !pname.trim() ? ""
+      : own.some(p => norm(p.name) === norm(pname)) ? `<span class="reg-mode add">기존 제품 사용</span>` : `<span class="reg-mode new">신규 제품</span>`;
   }
 
-  function fillProductSelect(customerId) {
-    const filtered = customerId ? products.filter(p => String(p.customer_id) === String(customerId)) : products;
-    const sel = document.getElementById("license-product-select");
-    sel.innerHTML = filtered.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("")
-      || "<option value=''>이 고객사의 제품이 없습니다</option>";
+  function validateReg() {
+    const lv = level();
+    const f = regForm.elements;
+    const missing = [];
+    const need = (name, label) => {
+      const el = f[name];
+      el.classList.remove("invalid");
+      if (!String(el.value || "").trim()) { missing.push([el, label]); el.classList.add("invalid"); }
+    };
+    need("customer_name", "고객사명");
+    const existing = findCustomerByName(f["customer_name"].value);
+    f["category"].classList.remove("invalid");
+    if (!existing) need("category", "구분");
+    if (lv >= 2) need("product_name", "제품명");
+    if (lv >= 3) { need("start_date", "시작일"); need("end_date", "만료일"); }
+    if (missing.length) {
+      setError($("reg-error"), `필수 항목을 입력해주세요: ${missing.map(m => m[1]).join(", ")}`);
+      missing[0][0].focus();
+      return false;
+    }
+    if (lv >= 3 && f["end_date"].value < f["start_date"].value) {
+      f["end_date"].classList.add("invalid");
+      setError($("reg-error"), "만료일은 시작일 이후여야 합니다.");
+      f["end_date"].focus();
+      return false;
+    }
+    setError($("reg-error"), "");
+    return true;
   }
 
-  function customerName(id) {
-    const c = customers.find(c => c.id === id);
-    return c ? c.name : "-";
+  function addYears(dateStr, years) {
+    const d = new Date(dateStr + "T00:00:00");
+    if (isNaN(d)) return "";
+    const day = d.getDate();
+    d.setFullYear(d.getFullYear() + years);
+    if (d.getDate() !== day) d.setDate(0); // 2/29 같은 날짜 보정
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
-  async function loadCustomers() {
-    const res = await apiFetch("/api/customers");
-    customers = await res.json();
-    fillCustomerSelects();
-    document.getElementById("customers-body").innerHTML = customers.map(c => `
-      <tr data-id="${c.id}">
-        <td>${escapeHtml(c.name)}</td>
-        <td>${escapeHtml(c.category || "-")}</td>
-        <td>${escapeHtml(c.contact || "-")}</td>
-        <td>${escapeHtml(c.email || "-")}</td>
-        <td>${escapeHtml(c.memo || "-")}</td>
-        <td class="actions">
-          <button type="button" class="overview-btn">보기</button>
-          <button type="button" class="edit-btn">수정</button>
-          <button type="button" class="delete-btn">삭제</button>
-        </td>
-      </tr>
-    `).join("");
+  function syncEndFromYears() {
+    const years = Number($("reg-years").value);
+    const start = $("reg-start").value;
+    if (years && start) $("reg-end").value = addYears(start, years);
+  }
 
-    document.querySelectorAll("#customers-body tr").forEach(tr => {
-      const id = Number(tr.dataset.id);
-      const c = customers.find(x => x.id === id);
-      tr.querySelector(".overview-btn").addEventListener("click", () => openOverview(id));
-      tr.querySelector(".edit-btn").addEventListener("click", async () => {
-        const name = prompt("고객사명", c.name); if (name === null) return;
-        const category = prompt("구분(예: 코스피, 대학)", c.category || "") ?? "";
-        const email = prompt("이메일", c.email || "") ?? "";
-        const memo = prompt("메모", c.memo || "") ?? "";
-        await apiFetch(`/api/customers/${id}`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, category, email, memo }),
-        });
-        await loadCustomers();
+  regForm.querySelectorAll("input[name='reg-level']").forEach(r => r.addEventListener("change", refreshRegUi));
+  for (const name of ["customer_name", "product_name"]) regForm.elements[name].addEventListener("input", refreshRegUi);
+  $("reg-years").addEventListener("change", syncEndFromYears);
+  $("reg-start").addEventListener("change", syncEndFromYears);
+
+  regForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    if (!validateReg()) return;
+    const lv = level();
+    const f = regForm.elements;
+    const payload = {
+      customer_name: f["customer_name"].value, category: f["category"].value,
+      contact: f["contact"].value, email: f["email"].value, memo: f["memo"].value,
+    };
+    if (lv >= 2) payload.product_name = f["product_name"].value;
+    if (lv >= 3) {
+      for (const k of ["start_date", "end_date", "license_key", "plan_name", "notify_target_option", "notify_staff_emails", "notify_customer_emails"]) {
+        payload[k] = f[k].value;
+      }
+      payload.warning_days = Number(f["warning_days"].value || 30);
+    }
+    const result = $("reg-result");
+    result.textContent = "";
+    let res;
+    try {
+      res = await apiFetch("/api/registrations", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload),
       });
-      tr.querySelector(".delete-btn").addEventListener("click", async () => {
-        if (!confirm(`'${c.name}' 고객사를 삭제할까요?`)) return;
-        const res = await apiFetch(`/api/customers/${id}`, { method: "DELETE" });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          alert(err.detail || "삭제 실패");
-          return;
-        }
-        await loadCustomers();
-      });
-    });
-  }
+    } catch (err) {
+      setError($("reg-error"), "서버에 연결하지 못했습니다. 잠시 후 다시 시도해주세요.");
+      return;
+    }
+    const data = await jsonOrEmpty(res);
+    if (!res.ok) { setError($("reg-error"), errText(data, "등록에 실패했습니다.")); return; }
 
-  async function openOverview(customerId) {
-    const panel = document.getElementById("overview-panel");
-    const overview = await apiFetch(`/api/customers/${customerId}/overview`).then(r => r.json());
-    document.getElementById("overview-title").textContent = `${overview.customer.name} 상세`;
-    document.getElementById("overview-body").innerHTML = `
-      <p class="hint">보유 제품 ${overview.products.length}개 · 라이선스 ${overview.licenses.length}건 · 클레임 ${overview.claim_count}건</p>
-      <table>
-        <thead><tr><th>제품</th><th>플랜</th><th>만료일</th><th>상태</th></tr></thead>
-        <tbody>
-          ${overview.licenses.map(l => `
-            <tr>
-              <td>${escapeHtml(l.product_name)}</td>
-              <td>${escapeHtml(l.plan_name || "-")}</td>
-              <td class="num">${escapeHtml(l.end_date)}</td>
-              <td><span class="status-word lic-${l.status}">${l.status}</span></td>
-            </tr>`).join("") || `<tr><td colspan="4" class="hint">등록된 라이선스가 없습니다.</td></tr>`}
-        </tbody>
-      </table>
-      <table style="margin-top:12px;">
-        <thead><tr><th>최근 클레임</th><th>상태</th><th>접수일</th></tr></thead>
-        <tbody>
-          ${overview.claims.slice(0, 10).map(c => `
-            <tr>
-              <td>${escapeHtml(c.claim_id)} · ${escapeHtml(c.product)}</td>
-              <td><span class="status-word s-${c.status}">${c.status}</span></td>
-              <td class="num">${escapeHtml(c.created_at)}</td>
-            </tr>`).join("") || `<tr><td colspan="3" class="hint">클레임 이력이 없습니다.</td></tr>`}
-        </tbody>
-      </table>
-    `;
-    panel.hidden = false;
-    panel.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
-  document.getElementById("overview-close").addEventListener("click", () => {
-    document.getElementById("overview-panel").hidden = true;
+    const parts = [];
+    parts.push(`고객사 ${data.created.customer ? "신규 등록" : "추가 등록(기존)"}`);
+    if (data.product) parts.push(`제품 ${data.created.product ? "신규 등록" : "기존 사용"}`);
+    if (data.license) parts.push("라이선스 등록");
+    result.textContent = `완료: ${data.customer.name} — ${parts.join(" · ")}`;
+    result.style.color = "var(--moss)";
+    const keepLevel = regForm.querySelector(`input[name='reg-level'][value='${lv}']`);
+    regForm.reset();
+    keepLevel.checked = true;
+    refreshRegUi();
+    await reloadAll();
   });
 
-  async function loadProducts() {
-    const res = await apiFetch("/api/products");
-    products = await res.json();
-    fillProductSelect(document.getElementById("license-customer-select").value);
+  /* ======================= 라이선스 목록: 검색·필터·정렬 ======================= */
+  const COLUMNS = [
+    { key: "customer_name", label: "사이트명", type: "text" },
+    { key: "category", label: "구분", type: "text" },
+    { key: "product_name", label: "제품", type: "text" },
+    { key: "plan_years", label: "구독기간", type: "num" },
+    { key: "license_key", label: "라이선스 키", type: "text" },
+    { key: "start_date", label: "시작일", type: "text" },
+    { key: "end_date", label: "만료일", type: "text" },
+    { key: "days_left", label: "남은 일수", type: "num" },
+    { key: "warning_days", label: "기준(D-)", type: "num" },
+    { key: "status", label: "상태", type: "status" },
+    { key: "notify_target_option", label: "알림 대상", type: "text" },
+    { key: null, label: "액션" },
+  ];
+  const sort = { key: "end_date", dir: "asc" };
+  let showAll = false;
 
-    document.getElementById("products-body").innerHTML = products.map(p => `
-      <tr data-id="${p.id}">
-        <td>${escapeHtml(customerName(p.customer_id))}</td>
-        <td>${escapeHtml(p.name)}</td>
-        <td class="actions">
-          <button type="button" class="edit-btn">수정</button>
-          <button type="button" class="delete-btn">삭제</button>
-        </td>
-      </tr>
-    `).join("");
+  function categoryOf(lic) { return (customers.find(c => c.id === lic.customer_id) || {}).category || ""; }
+  function yearsOf(lic) {
+    const a = new Date(lic.start_date), b = new Date(lic.end_date);
+    if (isNaN(a) || isNaN(b)) return 0;
+    return Math.round((b - a) / (365.25 * 24 * 3600 * 1000));
+  }
+  function decorate(lic) { return { ...lic, category: categoryOf(lic), plan_years: yearsOf(lic) }; }
 
-    document.querySelectorAll("#products-body tr").forEach(tr => {
-      const id = Number(tr.dataset.id);
-      const p = products.find(x => x.id === id);
-      tr.querySelector(".edit-btn").addEventListener("click", async () => {
-        const name = prompt("제품명", p.name); if (name === null) return;
-        await apiFetch(`/api/products/${id}`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }),
-        });
-        await loadProducts();
-      });
-      tr.querySelector(".delete-btn").addEventListener("click", async () => {
-        if (!confirm(`'${p.name}' 제품을 삭제할까요?`)) return;
-        const res = await apiFetch(`/api/products/${id}`, { method: "DELETE" });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          alert(err.detail || "삭제 실패");
-          return;
-        }
-        await loadProducts();
-      });
+  function currentFilters() {
+    return {
+      q: norm($("lic-q").value), category: $("lic-f-category").value, status: $("lic-f-status").value,
+      product: $("lic-f-product").value, years: $("lic-f-years").value,
+      from: $("lic-f-from").value, to: $("lic-f-to").value,
+    };
+  }
+  function hasFilter(f) { return Boolean(f.q || f.category || f.status || f.product || f.years || f.from || f.to); }
+
+  function renderHead() {
+    $("lic-head").innerHTML = COLUMNS.map(c => {
+      if (!c.key) return `<th>${c.label}</th>`;
+      const on = sort.key === c.key;
+      return `<th class="sortable${on ? " sorted" : ""}" data-key="${c.key}" tabindex="0" role="button"
+                  aria-sort="${on ? (sort.dir === "asc" ? "ascending" : "descending") : "none"}">
+                ${c.label}<span class="sort-ind">${on ? (sort.dir === "asc" ? "▲" : "▼") : "↕"}</span></th>`;
+    }).join("");
+    $("lic-head").querySelectorAll("th.sortable").forEach(th => {
+      const toggle = () => {
+        const key = th.dataset.key;
+        if (sort.key === key) sort.dir = sort.dir === "asc" ? "desc" : "asc";
+        else { sort.key = key; sort.dir = "asc"; }
+        renderLicenses();
+      };
+      th.addEventListener("click", toggle);
+      th.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
     });
   }
 
-  const NOTIFY_TARGET_LABELS = { both: "담당자+고객", staff: "담당자만", customer: "고객만", none: "끔" };
+  function compare(a, b) {
+    const col = COLUMNS.find(c => c.key === sort.key);
+    const x = a[sort.key], y = b[sort.key];
+    let r;
+    if (col.type === "num") r = (Number(x) || 0) - (Number(y) || 0);
+    else if (col.type === "status") r = (STATUS_RANK[x] ?? 9) - (STATUS_RANK[y] ?? 9);
+    else r = String(x ?? "").localeCompare(String(y ?? ""), "ko", { numeric: true });
+    return sort.dir === "asc" ? r : -r;
+  }
 
-  async function loadLicenses() {
-    const res = await apiFetch("/api/licenses");
-    const licenses = await res.json();
-    loadSiteSummary();
-    document.getElementById("licenses-body").innerHTML = licenses.map(lic => `
+  function renderLicenses() {
+    renderHead();
+    const f = currentFilters();
+    const filtered = hasFilter(f);
+    const body = $("licenses-body");
+    const total = licenses.length;
+
+    if (!filtered && !showAll) {
+      body.innerHTML = `<tr><td colspan="${COLUMNS.length}" class="empty-hint">
+        검색어나 조건을 입력하면 해당 라이선스만 보여 드립니다. 전부 보려면 <b>전체보기</b>를 누르세요.</td></tr>`;
+      $("lic-count").textContent = `등록된 라이선스 총 ${total}건 (목록은 검색/조건 선택 또는 전체보기 시 표시)`;
+      return;
+    }
+
+    const rows = licenses.map(decorate).filter(l => {
+      if (f.q && !(norm(l.customer_name).includes(f.q) || norm(l.product_name).includes(f.q) || norm(l.license_key).includes(f.q))) return false;
+      if (f.category && l.category !== f.category) return false;
+      if (f.status && l.status !== f.status) return false;
+      if (f.product && l.product_name !== f.product) return false;
+      if (f.years && String(l.plan_years) !== f.years) return false;
+      if (f.from && l.end_date < f.from) return false;
+      if (f.to && l.end_date > f.to) return false;
+      return true;
+    }).sort(compare);
+
+    $("lic-count").textContent = filtered
+      ? `선택보기: 조건에 맞는 ${rows.length}건 / 전체 ${total}건`
+      : `전체보기: ${rows.length}건`;
+    if (!rows.length) {
+      body.innerHTML = `<tr><td colspan="${COLUMNS.length}" class="empty-hint">조건에 맞는 라이선스가 없습니다.</td></tr>`;
+      return;
+    }
+    body.innerHTML = rows.map(lic => `
       <tr data-id="${lic.id}">
         <td>${escapeHtml(lic.customer_name)}</td>
-        <td>${escapeHtml((customers.find(c => c.id === lic.customer_id) || {}).category || "-")}</td>
+        <td>${escapeHtml(lic.category || "-")}</td>
         <td>${escapeHtml(lic.product_name)}</td>
-        <td>${escapeHtml(lic.plan_name || "-")}</td>
+        <td class="num">${lic.plan_years ? lic.plan_years + "년" : escapeHtml(lic.plan_name || "-")}</td>
         <td class="num">${escapeHtml(lic.license_key || "-")}</td>
         <td class="num">${escapeHtml(lic.start_date)}</td>
         <td class="num">${escapeHtml(lic.end_date)}</td>
@@ -326,21 +476,11 @@
           <button type="button" class="edit-btn">수정</button>
           <button type="button" class="delete-btn">삭제</button>
         </td>
-      </tr>
-    `).join("");
+      </tr>`).join("");
 
-    document.querySelectorAll("#licenses-body tr").forEach(tr => {
+    body.querySelectorAll("tr[data-id]").forEach(tr => {
       const id = Number(tr.dataset.id);
-      const lic = licenses.find(x => x.id === id);
-      tr.querySelector(".edit-btn").addEventListener("click", async () => {
-        const endDate = prompt("만료일(YYYY-MM-DD)", lic.end_date); if (endDate === null) return;
-        const warningDays = prompt("만료 임박 기준(일)", lic.warning_days); if (warningDays === null) return;
-        await apiFetch(`/api/licenses/${id}`, {
-          method: "PATCH", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ end_date: endDate, warning_days: Number(warningDays) }),
-        });
-        await loadLicenses();
-      });
+      tr.querySelector(".edit-btn").addEventListener("click", () => openLicenseModal(id));
       tr.querySelector(".delete-btn").addEventListener("click", async () => {
         if (!confirm("이 라이선스를 삭제할까요?")) return;
         await apiFetch(`/api/licenses/${id}`, { method: "DELETE" });
@@ -349,84 +489,200 @@
     });
   }
 
-  async function loadSiteSummary() {
-    const rows = await apiFetch("/api/licenses/site-summary").then(r => r.json());
-    document.getElementById("site-summary-body").innerHTML = rows.length
-      ? rows.map(s => `
-          <tr>
-            <td>${escapeHtml(s.site)}</td><td>${escapeHtml(s.category || "-")}</td>
-            <td class="num">${s.total}</td><td class="num">${s.active}</td>
-            <td class="num">${s.expiring}</td><td class="num">${s.expired}</td>
-            <td class="num">${s.y1}</td><td class="num">${s.y3}</td><td class="num">${s.y5}</td>
-          </tr>`).join("")
-      : `<tr><td colspan="9" class="hint">등록된 라이선스가 없습니다.</td></tr>`;
+  function fillFilterOptions() {
+    const keep = (id, values) => {
+      const sel = $(id), cur = sel.value;
+      sel.innerHTML = `<option value="">전체</option>` + values.map(v => `<option>${escapeHtml(v)}</option>`).join("");
+      if (values.includes(cur)) sel.value = cur;
+    };
+    keep("lic-f-category", [...new Set(customers.map(c => c.category).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko")));
+    keep("lic-f-product", [...new Set(licenses.map(l => l.product_name).filter(Boolean))].sort((a, b) => a.localeCompare(b, "ko")));
   }
 
-  document.getElementById("customer-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    await apiFetch("/api/customers", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(Object.fromEntries(fd.entries())),
-    });
-    e.target.reset();
-    await loadCustomers();
+  let searchTimer;
+  $("lic-q").addEventListener("input", () => { clearTimeout(searchTimer); searchTimer = setTimeout(renderLicenses, 200); });
+  for (const id of ["lic-f-category", "lic-f-status", "lic-f-product", "lic-f-years", "lic-f-from", "lic-f-to"]) {
+    $(id).addEventListener("change", renderLicenses);
+  }
+  $("lic-show-all").addEventListener("click", () => { showAll = true; renderLicenses(); });
+  $("lic-reset").addEventListener("click", () => {
+    showAll = false;
+    for (const id of ["lic-q", "lic-f-category", "lic-f-status", "lic-f-product", "lic-f-years", "lic-f-from", "lic-f-to"]) $(id).value = "";
+    renderLicenses();
   });
 
-  document.getElementById("product-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const payload = Object.fromEntries(fd.entries());
-    payload.customer_id = Number(payload.customer_id);
-    const res = await apiFetch("/api/products", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+  /* ======================= 라이선스 수정 모달 (달력 입력) ======================= */
+  let editingLicenseId = null;
+  function openLicenseModal(id) {
+    const lic = licenses.find(l => l.id === id);
+    if (!lic) return;
+    editingLicenseId = id;
+    $("lic-modal-title").textContent = `라이선스 수정 · ${lic.customer_name} / ${lic.product_name}`;
+    $("lm-start").value = lic.start_date || "";
+    $("lm-end").value = lic.end_date || "";
+    $("lm-warning").value = lic.warning_days || 30;
+    $("lm-plan").value = lic.plan_name || "";
+    $("lm-key").value = lic.license_key || "";
+    $("lm-target").value = lic.notify_target_option || "both";
+    $("lm-staff").value = lic.notify_staff_emails || "";
+    $("lm-customer").value = lic.notify_customer_emails || "";
+    setError($("lm-error"), "");
+    $("lic-modal").hidden = false;
+  }
+  function closeLicenseModal() { $("lic-modal").hidden = true; editingLicenseId = null; }
+  $("lic-modal-close").addEventListener("click", closeLicenseModal);
+  $("lic-modal").addEventListener("click", (e) => { if (e.target === $("lic-modal")) closeLicenseModal(); });
+
+  $("lm-save").addEventListener("click", async () => {
+    const start = $("lm-start").value, end = $("lm-end").value;
+    if (!start || !end) { setError($("lm-error"), "필수 항목을 입력해주세요: " + [!start && "시작일", !end && "만료일"].filter(Boolean).join(", ")); return; }
+    if (end < start) { setError($("lm-error"), "만료일은 시작일 이후여야 합니다."); return; }
+    const res = await apiFetch(`/api/licenses/${editingLicenseId}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        start_date: start, end_date: end, warning_days: Number($("lm-warning").value || 30),
+        plan_name: $("lm-plan").value, license_key: $("lm-key").value, notify_target_option: $("lm-target").value,
+        notify_staff_emails: $("lm-staff").value, notify_customer_emails: $("lm-customer").value,
+      }),
     });
-    if (res.ok) { e.target.reset(); await loadProducts(); }
-  });
-
-  document.getElementById("license-customer-select").addEventListener("change", (e) => {
-    fillProductSelect(e.target.value);
-  });
-
-  document.getElementById("license-form").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const payload = Object.fromEntries(fd.entries());
-    payload.product_id = Number(document.getElementById("license-product-select").value);
-    payload.warning_days = Number(payload.warning_days || 30);
-    const resultEl = document.getElementById("license-form-result");
-    resultEl.textContent = "";
-
-    const res = await apiFetch("/api/licenses", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      resultEl.textContent = err.detail || "등록 실패";
-      resultEl.style.color = "var(--coral)";
-      return;
-    }
-    resultEl.textContent = "라이선스가 등록되었습니다.";
-    resultEl.style.color = "var(--moss)";
-    e.target.reset();
+    if (!res.ok) { setError($("lm-error"), errText(await jsonOrEmpty(res), "저장하지 못했습니다.")); return; }
+    closeLicenseModal();
     await loadLicenses();
   });
 
+  /* ======================= 고객사 / 제품 목록 ======================= */
+  function customerName(id) { const c = customers.find(c => c.id === id); return c ? c.name : "-"; }
+
+  function renderCustomers() {
+    const q = norm($("cust-q").value);
+    const list = customers.filter(c => !q || norm(c.name).includes(q) || norm(c.category).includes(q));
+    $("customers-count").textContent = `(${customers.length}곳 — 눌러서 펼치기)`;
+    $("reg-customer-list").innerHTML = customers.map(c => `<option value="${escapeHtml(c.name)}">`).join("");
+    $("customers-body").innerHTML = list.map(c => `
+      <tr data-id="${c.id}">
+        <td>${escapeHtml(c.name)}</td><td>${escapeHtml(c.category || "-")}</td>
+        <td>${escapeHtml(c.contact || "-")}</td><td>${escapeHtml(c.email || "-")}</td><td>${escapeHtml(c.memo || "-")}</td>
+        <td class="actions">
+          <button type="button" class="overview-btn">보기</button>
+          <button type="button" class="edit-btn">수정</button>
+          <button type="button" class="delete-btn">삭제</button>
+        </td>
+      </tr>`).join("") || `<tr><td colspan="6" class="empty-hint">조건에 맞는 고객사가 없습니다.</td></tr>`;
+
+    document.querySelectorAll("#customers-body tr[data-id]").forEach(tr => {
+      const id = Number(tr.dataset.id);
+      const c = customers.find(x => x.id === id);
+      tr.querySelector(".overview-btn").addEventListener("click", () => openOverview(id));
+      tr.querySelector(".edit-btn").addEventListener("click", async () => {
+        const name = prompt("고객사명 (필수)", c.name); if (name === null) return;
+        const category = prompt("구분 (필수, 예: 코스피, 대학)", c.category || ""); if (category === null) return;
+        if (!name.trim() || !category.trim()) { alert("고객사명과 구분은 필수 입력입니다."); return; }
+        const email = prompt("이메일", c.email || "") ?? "";
+        const memo = prompt("메모", c.memo || "") ?? "";
+        await apiFetch(`/api/customers/${id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: name.trim(), category: category.trim(), email, memo }),
+        });
+        await reloadAll();
+      });
+      tr.querySelector(".delete-btn").addEventListener("click", async () => {
+        if (!confirm(`'${c.name}' 고객사를 삭제할까요?`)) return;
+        const res = await apiFetch(`/api/customers/${id}`, { method: "DELETE" });
+        if (!res.ok) { alert(errText(await jsonOrEmpty(res), "삭제 실패")); return; }
+        await reloadAll();
+      });
+    });
+  }
+
+  function renderProducts() {
+    const q = norm($("prod-q").value);
+    const list = products.filter(p => !q || norm(p.name).includes(q) || norm(customerName(p.customer_id)).includes(q));
+    $("products-count").textContent = `(${products.length}개 — 눌러서 펼치기)`;
+    $("products-body").innerHTML = list.map(p => `
+      <tr data-id="${p.id}">
+        <td>${escapeHtml(customerName(p.customer_id))}</td><td>${escapeHtml(p.name)}</td>
+        <td class="actions"><button type="button" class="edit-btn">수정</button><button type="button" class="delete-btn">삭제</button></td>
+      </tr>`).join("") || `<tr><td colspan="3" class="empty-hint">조건에 맞는 제품이 없습니다.</td></tr>`;
+
+    document.querySelectorAll("#products-body tr[data-id]").forEach(tr => {
+      const id = Number(tr.dataset.id);
+      const p = products.find(x => x.id === id);
+      tr.querySelector(".edit-btn").addEventListener("click", async () => {
+        const name = prompt("제품명 (필수)", p.name); if (name === null) return;
+        if (!name.trim()) { alert("제품명은 필수 입력입니다."); return; }
+        await apiFetch(`/api/products/${id}`, {
+          method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: name.trim() }),
+        });
+        await reloadAll();
+      });
+      tr.querySelector(".delete-btn").addEventListener("click", async () => {
+        if (!confirm(`'${p.name}' 제품을 삭제할까요?`)) return;
+        const res = await apiFetch(`/api/products/${id}`, { method: "DELETE" });
+        if (!res.ok) { alert(errText(await jsonOrEmpty(res), "삭제 실패")); return; }
+        await reloadAll();
+      });
+    });
+  }
+  $("cust-q").addEventListener("input", renderCustomers);
+  $("prod-q").addEventListener("input", renderProducts);
+
+  async function openOverview(customerId) {
+    const panel = $("overview-panel");
+    const overview = await apiFetch(`/api/customers/${customerId}/overview`).then(r => r.json());
+    $("overview-title").textContent = `${overview.customer.name} 상세`;
+    $("overview-body").innerHTML = `
+      <p class="hint">보유 제품 ${overview.products.length}개 · 라이선스 ${overview.licenses.length}건 · 클레임 ${overview.claim_count}건</p>
+      <div class="table-scroll"><table>
+        <thead><tr><th>제품</th><th>플랜</th><th>만료일</th><th>상태</th></tr></thead>
+        <tbody>${overview.licenses.map(l => `
+          <tr><td>${escapeHtml(l.product_name)}</td><td>${escapeHtml(l.plan_name || "-")}</td>
+          <td class="num">${escapeHtml(l.end_date)}</td><td><span class="status-word lic-${l.status}">${l.status}</span></td></tr>`).join("")
+          || `<tr><td colspan="4" class="hint">등록된 라이선스가 없습니다.</td></tr>`}</tbody>
+      </table></div>
+      <div class="table-scroll"><table style="margin-top:12px;">
+        <thead><tr><th>최근 클레임</th><th>상태</th><th>접수일</th></tr></thead>
+        <tbody>${overview.claims.slice(0, 10).map(c => `
+          <tr><td>${escapeHtml(c.claim_id)} · ${escapeHtml(c.product)}</td>
+          <td><span class="status-word s-${c.status}">${c.status}</span></td><td class="num">${escapeHtml(c.created_at)}</td></tr>`).join("")
+          || `<tr><td colspan="3" class="hint">클레임 이력이 없습니다.</td></tr>`}</tbody>
+      </table></div>`;
+    panel.hidden = false;
+    panel.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  $("overview-close").addEventListener("click", () => { $("overview-panel").hidden = true; });
+
+  /* ======================= 데이터 로딩 ======================= */
+  async function loadCustomers() { customers = await apiFetch("/api/customers").then(r => r.json()); renderCustomers(); }
+  async function loadProducts() { products = await apiFetch("/api/products").then(r => r.json()); renderProducts(); }
+  async function loadSiteSummary() {
+    const rows = await apiFetch("/api/licenses/site-summary").then(r => r.json());
+    $("site-summary-body").innerHTML = rows.length
+      ? rows.map(s => `<tr><td>${escapeHtml(s.site)}</td><td>${escapeHtml(s.category || "-")}</td>
+          <td class="num">${s.total}</td><td class="num">${s.active}</td><td class="num">${s.expiring}</td><td class="num">${s.expired}</td>
+          <td class="num">${s.y1}</td><td class="num">${s.y3}</td><td class="num">${s.y5}</td></tr>`).join("")
+      : `<tr><td colspan="9" class="hint">등록된 라이선스가 없습니다.</td></tr>`;
+  }
+  async function loadLicenses() {
+    licenses = await apiFetch("/api/licenses").then(r => r.json());
+    fillFilterOptions();
+    renderLicenses();
+    loadSiteSummary();
+  }
+  async function reloadAll() {
+    await Promise.all([loadCustomers(), loadProducts()]);
+    await loadLicenses();
+    refreshRegUi();
+  }
+
+  /* ======================= 일괄 가져오기 ======================= */
   async function runLicenseImport(dryRun) {
-    const fileInput = document.getElementById("license-import-file");
-    const resultEl = document.getElementById("license-import-result");
+    const fileInput = $("license-import-file");
+    const resultEl = $("license-import-result");
     const file = fileInput.files[0];
-    if (!file) {
-      alert("파일을 선택해주세요.");
-      return;
-    }
-    const defaultProduct = document.getElementById("license-import-product").value.trim();
-    const dryRunBtn = document.getElementById("license-import-dry-run-btn");
-    const importBtn = document.getElementById("license-import-btn");
-    dryRunBtn.disabled = true;
-    importBtn.disabled = true;
+    if (!file) { alert("파일을 선택해주세요."); return; }
+    const defaultProduct = $("license-import-product").value.trim();
+    const dryRunBtn = $("license-import-dry-run-btn"), importBtn = $("license-import-btn");
+    dryRunBtn.disabled = true; importBtn.disabled = true;
     resultEl.innerHTML = "불러오는 중...";
 
     const fd = new FormData();
@@ -438,15 +694,10 @@
     try {
       const res = await apiFetch(`/api/licenses/import?${params.toString()}`, { method: "POST", body: fd });
       const data = await res.json();
-      if (!res.ok) {
-        resultEl.innerHTML = `<p style="color: var(--coral);">가져오기 실패: ${escapeHtml(data.detail || res.status)}</p>`;
-        return;
-      }
+      if (!res.ok) { resultEl.innerHTML = `<p style="color: var(--coral);">가져오기 실패: ${escapeHtml(data.detail || res.status)}</p>`; return; }
       let html = data.dry_run
         ? `<p><strong>미리보기</strong> — 등록 예정 ${data.preview_rows.length}건 / 실패 ${data.failed_count}건</p>`
-        : `<p><strong>${data.imported_count}건</strong> 등록됨 / 총 ${data.total_rows}건 중 ` +
-          `라이선스 키 중복 ${data.duplicate_count}건 제외, 실패 ${data.failed_count}건</p>`;
-
+        : `<p><strong>${data.imported_count}건</strong> 등록됨 / 총 ${data.total_rows}건 중 라이선스 키 중복 ${data.duplicate_count}건 제외, 실패 ${data.failed_count}건</p>`;
       if (data.preview_rows && data.preview_rows.length) {
         html += "<div class='table-scroll'><table><thead><tr><th>고객사</th><th>제품</th><th>플랜</th><th>라이선스 키</th><th>시작일</th><th>만료일</th></tr></thead><tbody>" +
           data.preview_rows.map(r => `<tr><td>${escapeHtml(r.customer)}</td><td>${escapeHtml(r.product)}</td>` +
@@ -456,37 +707,26 @@
       }
       if (data.failed_rows && data.failed_rows.length) {
         html += "<p style='font-size:13px; color: var(--coral); margin-bottom:2px;'>실패</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
-          data.failed_rows.map(f => `<li>${f.row ? f.row + "행: " : ""}${escapeHtml(f.reason)}</li>`).join("") +
-          "</ul>";
+          data.failed_rows.map(f => `<li>${f.row ? f.row + "행: " : ""}${escapeHtml(f.reason)}</li>`).join("") + "</ul>";
       }
       if (data.duplicate_rows && data.duplicate_rows.length) {
         html += "<p style='font-size:13px; color: var(--warn); margin-bottom:2px;'>중복 라이선스 키 (건너뜀)</p><ul style='font-size:13px; color: var(--muted); margin-top:0;'>" +
-          data.duplicate_rows.map(d => `<li>${escapeHtml(d.license_key)} — ${escapeHtml(d.reason)}</li>`).join("") +
-          "</ul>";
+          data.duplicate_rows.map(d => `<li>${escapeHtml(d.license_key)} — ${escapeHtml(d.reason)}</li>`).join("") + "</ul>";
       }
       resultEl.innerHTML = html;
-      if (!dryRun) {
-        fileInput.value = "";
-        await loadCustomers();
-        await loadProducts();
-        await loadLicenses();
-      }
+      if (!dryRun) { fileInput.value = ""; await reloadAll(); }
     } catch (err) {
       resultEl.innerHTML = `<p style="color: var(--coral);">네트워크 오류로 가져오기에 실패했습니다.</p>`;
     } finally {
-      dryRunBtn.disabled = false;
-      importBtn.disabled = false;
+      dryRunBtn.disabled = false; importBtn.disabled = false;
     }
   }
+  $("license-import-dry-run-btn").addEventListener("click", () => runLicenseImport(true));
+  $("license-import-btn").addEventListener("click", () => runLicenseImport(false));
 
-  document.getElementById("license-import-dry-run-btn").addEventListener("click", () => runLicenseImport(true));
-  document.getElementById("license-import-btn").addEventListener("click", () => runLicenseImport(false));
-
-  (async () => {
-    await loadCustomers();
-    await loadProducts();
-    await loadLicenses();
-  })();
+  loadUser();
+  reloadAll();
+  refreshRegUi();
 </script>
 </body>
 </html>

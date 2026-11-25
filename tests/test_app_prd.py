@@ -455,3 +455,18 @@ def test_customer_create_requires_name_and_category(client):
     assert client.post("/api/customers", json={"name": "A", "category": ""}).status_code == 400
     assert client.post("/api/customers", json={"name": " ", "category": "대학"}).status_code == 400
     assert client.post("/api/customers", json={"name": "A", "category": "대학"}).status_code == 200
+
+
+# ---- 리뷰 반영: 메뉴 분리 페이지 ----
+
+def test_menu_pages_served_and_claims_requires_login(client):
+    for path in ("/", "/claims", "/licenses"):
+        res = client.get(path)
+        assert res.status_code == 200, path
+        assert "text/html" in res.headers["content-type"]
+    claims_html = client.get("/claims").text
+    assert "issue_started_at" in claims_html and "filter-date-from" in claims_html
+    assert "reg-form" in client.get("/licenses").text
+    assert "license-alert" in client.get("/").text and "claim-form" not in client.get("/").text
+    for asset in ("common.js", "dashboard.js", "app.js"):
+        assert client.get(f"/static/{asset}").status_code == 200

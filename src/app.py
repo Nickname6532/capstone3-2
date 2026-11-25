@@ -161,7 +161,7 @@ async def no_cache_static(request, call_next):
     캐시해서 수정사항이 반영 안 된 것처럼 보이는 문제가 실제로 있었다.
     """
     response = await call_next(request)
-    no_cache_paths = {"/", "/submit", "/track", "/login", "/admin", "/licenses", "/manuals"}
+    no_cache_paths = {"/", "/submit", "/track", "/login", "/admin", "/licenses", "/manuals", "/claims"}
     if request.url.path in no_cache_paths or request.url.path.startswith("/static/"):
         response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
     return response
@@ -899,6 +899,14 @@ def root(request: Request):
     if not current_user(request):
         return RedirectResponse("/login")
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/claims")
+def claims_page(request: Request):
+    """장애이력관리: 내부 접수 / 가져오기 / 기간 검색이 되는 이력 목록."""
+    if not current_user(request):
+        return RedirectResponse("/login")
+    return FileResponse(STATIC_DIR / "claims.html")
 
 
 @app.get("/submit")
