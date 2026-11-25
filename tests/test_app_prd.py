@@ -43,19 +43,19 @@ def _public_claim(client, contact="010-1234-5678"):
 # ---------------------------------------------------------------- 처리상세 / 첨부파일
 
 def test_create_claim_accepts_processing_detail_fields(client):
-    res = client.post("/api/claims", json={"customer": "넷스퀘어", "product": "Pro 플랜", "description": "로그인 불가",
+    res = client.post("/api/claims", json={"assignee": "담당자", "customer": "넷스퀘어", "product": "Pro 플랜", "description": "로그인 불가",
                                            "processing_type": "엔지니어방문", "difficulty": "high"})
     assert res.status_code == 200
     assert res.json()["processing_type"] == "엔지니어방문" and res.json()["difficulty"] == "high"
 
 
 def test_patch_claim_rejects_unknown_processing_type(client):
-    created = client.post("/api/claims", json={"customer": "A", "product": "P", "description": "D"}).json()
+    created = client.post("/api/claims", json={"assignee": "담당자", "customer": "A", "product": "P", "description": "D"}).json()
     assert client.patch(f"/api/claims/{created['claim_id']}", json={"processing_type": "텔레포트"}).status_code == 400
 
 
 def test_attachment_upload_list_download_delete(client):
-    claim_id = client.post("/api/claims", json={"customer": "A", "product": "P", "description": "D"}).json()["claim_id"]
+    claim_id = client.post("/api/claims", json={"assignee": "담당자", "customer": "A", "product": "P", "description": "D"}).json()["claim_id"]
     att = client.post(f"/api/claims/{claim_id}/attachments", files={"file": ("screenshot.png", PNG, "image/png")}).json()
     assert att["filename"] == "screenshot.png"
     assert len(client.get(f"/api/claims/{claim_id}/attachments").json()) == 1
@@ -68,7 +68,7 @@ def test_attachment_upload_list_download_delete(client):
 def test_attachment_upload_rejects_disallowed_type_oversize_and_unknown_claim(client, monkeypatch):
     import app as app_module
 
-    claim_id = client.post("/api/claims", json={"customer": "A", "product": "P", "description": "D"}).json()["claim_id"]
+    claim_id = client.post("/api/claims", json={"assignee": "담당자", "customer": "A", "product": "P", "description": "D"}).json()["claim_id"]
     assert client.post(f"/api/claims/{claim_id}/attachments", files={"file": ("v.exe", b"MZ", "application/x-msdownload")}).status_code == 400
     monkeypatch.setattr(app_module, "MAX_ATTACHMENT_BYTES", 10)
     assert client.post(f"/api/claims/{claim_id}/attachments", files={"file": ("b.png", b"0" * 100, "image/png")}).status_code == 400
@@ -108,7 +108,7 @@ def test_customer_overview_endpoint(client):
     cust = client.post("/api/customers", json={"name": "가나전자"}).json()
     prod = client.post("/api/products", json={"customer_id": cust["id"], "name": "냉장고"}).json()
     client.post("/api/licenses", json={"product_id": prod["id"], "start_date": _iso(-10), "end_date": _iso(10)})
-    client.post("/api/claims", json={"customer": "가나전자", "product": "냉장고", "description": "D", "customer_id": cust["id"]})
+    client.post("/api/claims", json={"assignee": "담당자", "customer": "가나전자", "product": "냉장고", "description": "D", "customer_id": cust["id"]})
     overview = client.get(f"/api/customers/{cust['id']}/overview").json()
     assert overview["claim_count"] == 1 and len(overview["licenses"]) == 1
 
@@ -116,14 +116,14 @@ def test_customer_overview_endpoint(client):
 # ---------------------------------------------------------------- 처리이력 / 확장 필드
 
 def test_claim_history_endpoint(client):
-    claim = client.post("/api/claims", json={"customer": "A", "product": "P", "description": "D"}).json()
+    claim = client.post("/api/claims", json={"assignee": "담당자", "customer": "A", "product": "P", "description": "D"}).json()
     client.patch(f"/api/claims/{claim['claim_id']}", json={"status": "처리중", "note": "접수 확인"})
     history = client.get(f"/api/claims/{claim['claim_id']}/history").json()
     assert len(history) == 2 and history[-1]["note"] == "접수 확인" and history[-1]["changed_by"] == "테스터"
 
 
 def test_claim_extended_processing_fields_round_trip(client):
-    claim = client.post("/api/claims", json={
+    claim = client.post("/api/claims", json={"assignee": "담당자", 
         "customer": "A", "product": "P", "description": "D", "sub_status": "엔지니어방문예정", "processing_minutes": 45,
         "partner_name": "협력업체A", "partner_contact": "02-111-2222", "scheduled_visit_at": "2026-11-20 10:00"}).json()
     assert claim["sub_status"] == "엔지니어방문예정" and claim["partner_name"] == "협력업체A"
@@ -169,7 +169,7 @@ def test_public_note_allowed_before_done_blocked_after(client):
 # ---------------------------------------------------------------- 통계 / 가져오기
 
 def test_stats_analytics_shape(client):
-    claim = client.post("/api/claims", json={"customer": "A", "product": "P", "description": "D", "assignee": "김담당",
+    claim = client.post("/api/claims", json={"assignee": "담당자", "customer": "A", "product": "P", "description": "D", "assignee": "김담당",
                                              "processing_minutes": 30, "difficulty": "medium"}).json()
     client.patch(f"/api/claims/{claim['claim_id']}", json={"status": "처리중"})
     client.patch(f"/api/claims/{claim['claim_id']}", json={"status": "완료"})
@@ -180,7 +180,7 @@ def test_stats_analytics_shape(client):
 
 
 def test_stats_export_csv(client):
-    client.post("/api/claims", json={"customer": "A", "product": "P", "description": "D"})
+    client.post("/api/claims", json={"assignee": "담당자", "customer": "A", "product": "P", "description": "D"})
     res = client.get("/api/stats/export.csv")
     assert res.status_code == 200 and res.headers["content-type"].startswith("text/csv") and "접수번호" in res.text
 
@@ -247,10 +247,10 @@ def test_manuals_crud_endpoints(client):
 
 
 def test_claim_recommendations_endpoint(client):
-    old = client.post("/api/claims", json={"customer": "X", "product": "P", "category": "C", "description": "D1"}).json()
+    old = client.post("/api/claims", json={"assignee": "담당자", "customer": "X", "product": "P", "category": "C", "description": "D1"}).json()
     client.patch(f"/api/claims/{old['claim_id']}", json={"status": "처리중"})
     client.patch(f"/api/claims/{old['claim_id']}", json={"status": "완료", "resolution": "해결함"})
-    current = client.post("/api/claims", json={"customer": "Y", "product": "P", "category": "C", "description": "D2"}).json()
+    current = client.post("/api/claims", json={"assignee": "담당자", "customer": "Y", "product": "P", "category": "C", "description": "D2"}).json()
     res = client.get(f"/api/claims/{current['claim_id']}/recommendations").json()
     assert len(res["similar_claims"]) == 1 and res["similar_claims"][0]["claim_id"] == old["claim_id"]
 
@@ -361,3 +361,42 @@ def test_license_import_dry_run_reports_key_duplicates(client):
     client.post("/api/licenses/import", params={"default_product_name": "VMware"}, files={"file": ("v.csv", VMWARE_CSV, "text/csv")})
     body = client.post("/api/licenses/import", params={"dry_run": "true"}, files={"file": ("v.csv", VMWARE_CSV, "text/csv")}).json()
     assert body["duplicate_count"] == 3 and body["preview_rows"] == []
+
+
+# ---- 리뷰 반영: 필수 입력 검사 / 장애 발생·종료시점 / 기간 검색 ----
+
+def test_create_claim_requires_core_fields(client):
+    base = {"customer": "A", "product": "P", "assignee": "김담당", "description": "D"}
+    for field, label in (("customer", "고객사명"), ("product", "제품"), ("assignee", "담당자명"), ("description", "장애 내용")):
+        for blank in ("", "   "):
+            res = client.post("/api/claims", json={**base, field: blank})
+            assert res.status_code == 400, (field, blank)
+            assert label in res.json()["detail"]
+    assert client.post("/api/claims", json=base).status_code == 200
+
+
+def test_claim_issue_period_round_trip_and_validation(client):
+    base = {"customer": "A", "product": "P", "assignee": "김담당", "description": "D"}
+    claim = client.post("/api/claims", json={**base, "issue_started_at": "2026-11-01T09:00", "issue_ended_at": "2026-11-01T11:30"}).json()
+    assert claim["issue_started_at"] == "2026-11-01T09:00" and claim["issue_ended_at"] == "2026-11-01T11:30"
+    assert client.post("/api/claims", json={**base, "issue_started_at": "2026-11-02", "issue_ended_at": "2026-11-01"}).status_code == 400
+    bad = client.patch(f"/api/claims/{claim['claim_id']}", json={"issue_started_at": "2026-11-05", "issue_ended_at": "2026-11-01"})
+    assert bad.status_code == 400
+    ok = client.patch(f"/api/claims/{claim['claim_id']}", json={"issue_ended_at": "2026-11-03T10:00"}).json()
+    assert ok["issue_ended_at"] == "2026-11-03T10:00"
+
+
+def test_claims_date_range_filter_uses_issue_start_then_created(client):
+    base = {"customer": "A", "product": "P", "assignee": "김담당", "description": "D"}
+    old = client.post("/api/claims", json={**base, "issue_started_at": "2026-01-10T08:00"}).json()
+    recent = client.post("/api/claims", json={**base, "issue_started_at": "2026-11-20T08:00"}).json()
+    no_issue_date = client.post("/api/claims", json=base).json()  # 접수일(오늘)로 취급
+
+    def ids(**params):
+        return {c["claim_id"] for c in client.get("/api/claims", params=params).json()}
+
+    assert ids(date_from="2026-01-01", date_to="2026-01-31") == {old["claim_id"]}
+    assert ids(date_from="2026-11-01", date_to="2026-11-30") >= {recent["claim_id"]}
+    assert old["claim_id"] not in ids(date_from="2026-02-01")
+    assert ids(date_to="2026-01-10") == {old["claim_id"]}  # 끝 날짜 포함
+    assert no_issue_date["claim_id"] in ids(date_from=no_issue_date["created_at"][:10], date_to=no_issue_date["created_at"][:10])

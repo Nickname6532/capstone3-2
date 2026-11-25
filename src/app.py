@@ -758,6 +758,8 @@ class ClaimCreate(BaseModel):
     partner_contact: Optional[str] = ""
     scheduled_visit_at: Optional[str] = ""
     completed_visit_at: Optional[str] = ""
+    issue_started_at: Optional[str] = ""  # 장애 발생시점 (달력 입력)
+    issue_ended_at: Optional[str] = ""  # 장애 종료시점
 
 
 class PublicClaimCreate(BaseModel):
@@ -802,6 +804,8 @@ class ClaimUpdate(BaseModel):
     partner_contact: Optional[str] = None
     scheduled_visit_at: Optional[str] = None
     completed_visit_at: Optional[str] = None
+    issue_started_at: Optional[str] = None
+    issue_ended_at: Optional[str] = None
     note: Optional[str] = None  # 상태 변경/재오픈 사유 등 — claim_history에만 남고 클레임 필드로는 저장 안 됨
 
 
@@ -824,10 +828,30 @@ def track_page():
     return FileResponse(STATIC_DIR / "submit.html")
 
 
+def _require_fields(data: dict[str, Any], labels: dict[str, str]) -> None:
+    missing = [label for key, label in labels.items() if not str(data.get(key) or "").strip()]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"필수 항목을 입력해주세요: {', '.join(missing)}")
+    for key in labels:
+        data[key] = str(data[key]).strip()
+
+
+def _check_issue_period(started: Optional[str], ended: Optional[str]) -> None:
+    if started and ended and ended < started:
+        raise HTTPException(status_code=400, detail="장애 종료시점이 발생시점보다 빠릅니다")
+
+
 @app.post("/api/claims")
 def create_claim(payload: ClaimCreate, _: dict = Depends(require_login)):
-    """내부 직원용 접수 (전화 응대 내용을 대신 입력하는 등)."""
-    row = store.create_claim(payload.model_dump())
+    """내부 직원용 접수 (전화 응대 내용을 대신 입력하는 등).
+
+    필수 항목(고객사명/제품/담당자명/장애 내용)이 비어 있으면 등록하지 않는다 — 화면의
+    required 속성만 믿지 않고 서버에서도 막는다(공백만 입력한 경우 포함).
+    """
+    data = payload.model_dump()
+    _require_fields(data, {"customer": "고객사명", "product": "제품", "assignee": "담당자명", "description": "장애 내용"})
+    _check_issue_period(data.get("issue_started_at"), data.get("issue_ended_at"))
+    row = store.create_claim(data)
     return row
 
 
@@ -1032,9 +1056,15 @@ def list_claims(
     contact: Optional[str] = None,
     q: Optional[str] = None,
     difficulty: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     _: dict = Depends(require_login),
 ):
-    return store.list_claims(status=status, assignee=assignee, channel=channel, contact=contact, q=q, difficulty=difficulty)
+    """date_from/date_to(YYYY-MM-DD)는 장애 발생시점(없으면 접수일) 기준 기간 검색."""
+    return store.list_claims(
+        status=status, assignee=assignee, channel=channel, contact=contact, q=q, difficulty=difficulty,
+        date_from=date_from, date_to=date_to,
+    )
 
 
 @app.get("/api/claims/{claim_id}")
@@ -1048,6 +1078,7 @@ def get_claim(claim_id: str, _: dict = Depends(require_login)):
 @app.patch("/api/claims/{claim_id}")
 def update_claim(claim_id: str, payload: ClaimUpdate, user: dict = Depends(require_login)):
     updates = {k: v for k, v in payload.model_dump().items() if v is not None}
+    _check_issue_period(updates.get("issue_started_at"), updates.get("issue_ended_at"))
     updates["changed_by"] = user.get("display_name") or user.get("username") or ""
     try:
         return store.update_claim(claim_id, updates)

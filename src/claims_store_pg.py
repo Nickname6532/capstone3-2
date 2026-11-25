@@ -89,7 +89,9 @@ CREATE TABLE IF NOT EXISTS claims (
     partner_name TEXT NOT NULL DEFAULT '',
     partner_contact TEXT NOT NULL DEFAULT '',
     scheduled_visit_at TEXT NOT NULL DEFAULT '',
-    completed_visit_at TEXT NOT NULL DEFAULT ''
+    completed_visit_at TEXT NOT NULL DEFAULT '',
+    issue_started_at TEXT NOT NULL DEFAULT '',
+    issue_ended_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
 CREATE INDEX IF NOT EXISTS idx_claims_channel ON claims(channel);
@@ -107,6 +109,8 @@ ALTER TABLE claims ADD COLUMN IF NOT EXISTS partner_name TEXT NOT NULL DEFAULT '
 ALTER TABLE claims ADD COLUMN IF NOT EXISTS partner_contact TEXT NOT NULL DEFAULT '';
 ALTER TABLE claims ADD COLUMN IF NOT EXISTS scheduled_visit_at TEXT NOT NULL DEFAULT '';
 ALTER TABLE claims ADD COLUMN IF NOT EXISTS completed_visit_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS issue_started_at TEXT NOT NULL DEFAULT '';
+ALTER TABLE claims ADD COLUMN IF NOT EXISTS issue_ended_at TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS claim_history (
     id SERIAL PRIMARY KEY,
@@ -309,6 +313,8 @@ class PgClaimsStore:
                 "partner_contact": data.get("partner_contact", ""),
                 "scheduled_visit_at": data.get("scheduled_visit_at", ""),
                 "completed_visit_at": data.get("completed_visit_at", ""),
+                "issue_started_at": data.get("issue_started_at", ""),
+                "issue_ended_at": data.get("issue_ended_at", ""),
             }
             placeholders = ", ".join(f"%({f})s" for f in FIELDS)
             self._execute(f"INSERT INTO claims ({', '.join(FIELDS)}) VALUES ({placeholders})", row)
@@ -376,6 +382,8 @@ class PgClaimsStore:
                 "partner_contact": data.get("partner_contact", ""),
                 "scheduled_visit_at": data.get("scheduled_visit_at", ""),
                 "completed_visit_at": data.get("completed_visit_at", ""),
+                "issue_started_at": data.get("issue_started_at", ""),
+                "issue_ended_at": data.get("issue_ended_at", ""),
             }
             placeholders = ", ".join(f"%({f})s" for f in FIELDS)
             self._execute(f"INSERT INTO claims ({', '.join(FIELDS)}) VALUES ({placeholders})", row)
@@ -391,6 +399,8 @@ class PgClaimsStore:
         contact: Optional[str] = None,
         q: Optional[str] = None,
         difficulty: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         clauses = []
         params: list[Any] = []
@@ -410,6 +420,13 @@ class PgClaimsStore:
             clauses.append("REPLACE(contact, '-', '') LIKE %s")
             digits_only = "".join(ch for ch in contact if ch.isdigit())
             params.append(f"%{digits_only}%")
+        # 기간 검색: 장애 발생시점(없으면 접수일) 날짜 기준, 양 끝 포함.
+        if date_from:
+            clauses.append("substr(COALESCE(NULLIF(issue_started_at, ''), created_at), 1, 10) >= %s")
+            params.append(date_from[:10])
+        if date_to:
+            clauses.append("substr(COALESCE(NULLIF(issue_started_at, ''), created_at), 1, 10) <= %s")
+            params.append(date_to[:10])
         if q:
             clauses.append("(customer ILIKE %s OR product ILIKE %s OR description ILIKE %s)")
             like = f"%{q}%"
@@ -460,6 +477,7 @@ class PgClaimsStore:
                 "processing_type", "visit_time", "resolution", "difficulty",
                 "customer_id", "product_id", "license_id", "sub_status", "processing_minutes",
                 "partner_name", "partner_contact", "scheduled_visit_at", "completed_visit_at",
+                "issue_started_at", "issue_ended_at",
             ):
                 if key in updates and updates[key] is not None:
                     row[key] = updates[key]
@@ -476,7 +494,8 @@ class PgClaimsStore:
                    description=%s, completed_at=%s, tokens_input=%s, tokens_output=%s, cost_krw=%s,
                    processing_type=%s, visit_time=%s, resolution=%s, difficulty=%s,
                    customer_id=%s, product_id=%s, license_id=%s, sub_status=%s, processing_minutes=%s,
-                   partner_name=%s, partner_contact=%s, scheduled_visit_at=%s, completed_visit_at=%s
+                   partner_name=%s, partner_contact=%s, scheduled_visit_at=%s, completed_visit_at=%s,
+                   issue_started_at=%s, issue_ended_at=%s
                    WHERE claim_id=%s""",
                 (
                     row["updated_at"],
@@ -502,6 +521,8 @@ class PgClaimsStore:
                     row.get("partner_contact", ""),
                     row.get("scheduled_visit_at", ""),
                     row.get("completed_visit_at", ""),
+                    row.get("issue_started_at", ""),
+                    row.get("issue_ended_at", ""),
                     claim_id,
                 ),
             )

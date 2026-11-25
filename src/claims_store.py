@@ -100,6 +100,8 @@ FIELDS = [
     "partner_contact",
     "scheduled_visit_at",
     "completed_visit_at",
+    "issue_started_at",
+    "issue_ended_at",
 ]
 
 _SCHEMA = f"""
@@ -132,7 +134,9 @@ CREATE TABLE IF NOT EXISTS claims (
     partner_name TEXT NOT NULL DEFAULT '',
     partner_contact TEXT NOT NULL DEFAULT '',
     scheduled_visit_at TEXT NOT NULL DEFAULT '',
-    completed_visit_at TEXT NOT NULL DEFAULT ''
+    completed_visit_at TEXT NOT NULL DEFAULT '',
+    issue_started_at TEXT NOT NULL DEFAULT '',
+    issue_ended_at TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_claims_status ON claims(status);
 CREATE INDEX IF NOT EXISTS idx_claims_channel ON claims(channel);
@@ -301,6 +305,8 @@ class ClaimsStore:
             ("partner_contact", "TEXT NOT NULL DEFAULT ''"),
             ("scheduled_visit_at", "TEXT NOT NULL DEFAULT ''"),
             ("completed_visit_at", "TEXT NOT NULL DEFAULT ''"),
+            ("issue_started_at", "TEXT NOT NULL DEFAULT ''"),
+            ("issue_ended_at", "TEXT NOT NULL DEFAULT ''"),
         ):
             if col not in claims_cols:
                 self._conn.execute(f"ALTER TABLE claims ADD COLUMN {col} {ddl}")
@@ -362,6 +368,8 @@ class ClaimsStore:
                 "partner_contact": data.get("partner_contact", ""),
                 "scheduled_visit_at": data.get("scheduled_visit_at", ""),
                 "completed_visit_at": data.get("completed_visit_at", ""),
+                "issue_started_at": data.get("issue_started_at", ""),
+                "issue_ended_at": data.get("issue_ended_at", ""),
             }
             self._conn.execute(
                 f"INSERT INTO claims ({', '.join(FIELDS)}) VALUES ({', '.join('?' for _ in FIELDS)})",
@@ -438,6 +446,8 @@ class ClaimsStore:
                 "partner_contact": data.get("partner_contact", ""),
                 "scheduled_visit_at": data.get("scheduled_visit_at", ""),
                 "completed_visit_at": data.get("completed_visit_at", ""),
+                "issue_started_at": data.get("issue_started_at", ""),
+                "issue_ended_at": data.get("issue_ended_at", ""),
             }
             self._conn.execute(
                 f"INSERT INTO claims ({', '.join(FIELDS)}) VALUES ({', '.join('?' for _ in FIELDS)})",
@@ -460,6 +470,8 @@ class ClaimsStore:
         contact: Optional[str] = None,
         q: Optional[str] = None,
         difficulty: Optional[str] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
     ) -> list[dict[str, Any]]:
         clauses = []
         params: list[Any] = []
@@ -480,6 +492,13 @@ class ClaimsStore:
             clauses.append("REPLACE(contact, '-', '') LIKE ?")
             digits_only = "".join(ch for ch in contact if ch.isdigit())
             params.append(f"%{digits_only}%")
+        # 기간 검색: 장애 발생시점(없으면 접수일) 날짜 기준, 양 끝 포함.
+        if date_from:
+            clauses.append("substr(COALESCE(NULLIF(issue_started_at, ''), created_at), 1, 10) >= ?")
+            params.append(date_from[:10])
+        if date_to:
+            clauses.append("substr(COALESCE(NULLIF(issue_started_at, ''), created_at), 1, 10) <= ?")
+            params.append(date_to[:10])
         if q:
             clauses.append("(customer LIKE ? OR product LIKE ? OR description LIKE ?)")
             like = f"%{q}%"
@@ -563,6 +582,7 @@ class ClaimsStore:
                 "processing_type", "visit_time", "resolution", "difficulty",
                 "customer_id", "product_id", "license_id", "sub_status", "processing_minutes",
                 "partner_name", "partner_contact", "scheduled_visit_at", "completed_visit_at",
+                "issue_started_at", "issue_ended_at",
             ):
                 if key in updates and updates[key] is not None:
                     row[key] = updates[key]
@@ -579,7 +599,8 @@ class ClaimsStore:
                    description=?, completed_at=?, tokens_input=?, tokens_output=?, cost_krw=?,
                    processing_type=?, visit_time=?, resolution=?, difficulty=?,
                    customer_id=?, product_id=?, license_id=?, sub_status=?, processing_minutes=?,
-                   partner_name=?, partner_contact=?, scheduled_visit_at=?, completed_visit_at=?
+                   partner_name=?, partner_contact=?, scheduled_visit_at=?, completed_visit_at=?,
+                   issue_started_at=?, issue_ended_at=?
                    WHERE claim_id=?""",
                 (
                     row["updated_at"],
@@ -605,6 +626,8 @@ class ClaimsStore:
                     row.get("partner_contact", ""),
                     row.get("scheduled_visit_at", ""),
                     row.get("completed_visit_at", ""),
+                    row.get("issue_started_at", ""),
+                    row.get("issue_ended_at", ""),
                     claim_id,
                 ),
             )

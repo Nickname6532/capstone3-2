@@ -36,7 +36,7 @@ def client(tmp_path, monkeypatch):
 def test_create_and_list_claim(client):
     res = client.post(
         "/api/claims",
-        json={"customer": "가나전자", "product": "냉장고", "description": "문이 안닫힘"},
+        json={"assignee": "담당자", "customer": "가나전자", "product": "냉장고", "description": "문이 안닫힘"},
     )
     assert res.status_code == 200
     claim_id = res.json()["claim_id"]
@@ -62,7 +62,7 @@ def test_public_claim_rejects_invalid_channel(client):
 
 def test_patch_reopen_after_done_succeeds(client):
     res = client.post(
-        "/api/claims", json={"customer": "A", "product": "P", "description": "D"}
+        "/api/claims", json={"assignee": "담당자", "customer": "A", "product": "P", "description": "D"}
     )
     claim_id = res.json()["claim_id"]
     client.patch(f"/api/claims/{claim_id}", json={"status": "완료"})
@@ -74,7 +74,7 @@ def test_patch_reopen_after_done_succeeds(client):
 
 def test_patch_invalid_transition_returns_400(client):
     res = client.post(
-        "/api/claims", json={"customer": "A", "product": "P", "description": "D"}
+        "/api/claims", json={"assignee": "담당자", "customer": "A", "product": "P", "description": "D"}
     )
     claim_id = res.json()["claim_id"]
     res = client.patch(f"/api/claims/{claim_id}", json={"status": "존재안함"})
@@ -131,7 +131,7 @@ def test_bulk_import_rejects_bad_file_with_400(client):
 
 def test_stats_summary_shape(client):
     client.post(
-        "/api/claims", json={"customer": "A", "product": "P", "description": "D"}
+        "/api/claims", json={"assignee": "담당자", "customer": "A", "product": "P", "description": "D"}
     )
     res = client.get("/api/stats/summary")
     assert res.status_code == 200
