@@ -4,9 +4,9 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>클레임 접수</title>
-<link rel="stylesheet" href="/static/style.css?v=12" />
+<link rel="stylesheet" href="/static/style.css?v=16" />
 <style>
-  main.narrow { max-width: 440px; }
+  main.narrow { max-width: 480px; }
 
   .lede {
     margin: 0 0 20px;
@@ -18,10 +18,19 @@
   .success { display: none; }
 
   .ticket {
+    position: relative;
     background: var(--surface);
-    border: 1px solid var(--line);
+    border: 1px solid var(--line-strong);
+    border-top: 4px solid var(--amber-hi);
     padding: 0;
   }
+  .ticket .perf { position: relative; }
+  .ticket .perf::before, .ticket .perf::after {
+    content: ""; position: absolute; top: -11px; width: 22px; height: 22px; border-radius: 50%;
+    background: var(--ink); border: 1px solid var(--line-strong);
+  }
+  .ticket .perf::before { left: -12px; }
+  .ticket .perf::after { right: -12px; }
 
   .ticket-top {
     padding: 28px 24px 22px;
@@ -74,12 +83,6 @@
     color: var(--muted);
   }
 
-  .tabs { display: flex; border: 1px solid var(--line); margin-bottom: 18px; }
-  .tab-btn {
-    flex: 1; border: none; background: var(--surface); color: var(--muted);
-    padding: 11px 8px; font-weight: 500; border-radius: 0;
-  }
-  .tab-btn.active { background: var(--teal); color: #0c1816; }
   .tab-panel[hidden] { display: none; }
 
   .track-status { padding: 4px 0; }
@@ -88,6 +91,7 @@
 </head>
 <body>
 <header>
+  <p class="eyebrow">CUSTOMER DESK · 접수</p>
   <h1>클레임 접수</h1>
   <p class="sub">문제를 알려주시면 담당자가 확인합니다</p>
 </header>
